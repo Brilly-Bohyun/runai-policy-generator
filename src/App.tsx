@@ -20,9 +20,49 @@ const itemizedGuidance: Record<
   string,
   { instancesTitle: string; instancesHint: string; attributesHint: string }
 > = {
+  environmentVariables: {
+    instancesTitle: "Environment variable instances",
+    instancesHint: "Example: name=HF_HOME, value=/cache/hf",
+    attributesHint: "Shared defaults. Example: exclude=false"
+  },
+  annotations: {
+    instancesTitle: "Annotation instances",
+    instancesHint: "Example: name=sidecar.istio.io/inject, value=false",
+    attributesHint: "Shared defaults. Example: exclude=false"
+  },
+  labels: {
+    instancesTitle: "Label instances",
+    instancesHint: "Example: name=team, value=research",
+    attributesHint: "Shared defaults. Example: exclude=false"
+  },
+  tolerations: {
+    instancesTitle: "Toleration instances",
+    instancesHint: "Example: key=gpu, operator=Equal, value=true, effect=NoSchedule",
+    attributesHint: "Shared defaults. Example: effect=NoSchedule"
+  },
+  ports: {
+    instancesTitle: "Port instances",
+    instancesHint: "Example: container=8888, serviceType=NodePort, toolName=Jupyter",
+    attributesHint: "Shared defaults. Example: serviceType=ClusterIP"
+  },
+  exposedUrls: {
+    instancesTitle: "Exposed URL instances",
+    instancesHint: "Example: url=https://demo.company.ai",
+    attributesHint: "Shared defaults. Example: exclude=false"
+  },
+  relatedUrls: {
+    instancesTitle: "Related URL instances",
+    instancesHint: "Example: url=https://grafana.company.ai/run-42",
+    attributesHint: "Shared defaults. Example: exclude=false"
+  },
   storageHostPath: {
     instancesTitle: "Mount instances",
     instancesHint: "Example: path=/datasets, mountPath=/mnt/datasets, readOnly=true",
+    attributesHint: "Shared attribute defaults. Example: readOnly=true"
+  },
+  storageDataVolume: {
+    instancesTitle: "Data volume instances",
+    instancesHint: "Example: mountPath=/mnt/dataset, subPath=train",
     attributesHint: "Shared attribute defaults. Example: readOnly=true"
   },
   storagePvc: {
@@ -40,6 +80,11 @@ const itemizedGuidance: Record<
     instancesHint: "Example: bucket=my-bucket, mountPath=/mnt/s3",
     attributesHint: "Shared attribute defaults. Example: readOnly=true"
   },
+  storageNfs: {
+    instancesTitle: "NFS instances",
+    instancesHint: "Example: server=nfs.company.local, path=/exports/data, mountPath=/mnt/nfs",
+    attributesHint: "Shared attribute defaults. Example: readOnly=true"
+  },
   storageConfigMapVolumes: {
     instancesTitle: "ConfigMap instances",
     instancesHint: "Example: name=app-config, mountPath=/etc/config",
@@ -49,8 +94,42 @@ const itemizedGuidance: Record<
     instancesTitle: "Secret instances",
     instancesHint: "Example: secretName=api-keys, mountPath=/run/secrets",
     attributesHint: "Shared attribute defaults. Example: readOnly=true"
+  },
+  storageEmptyDir: {
+    instancesTitle: "EmptyDir instances",
+    instancesHint: "Example: mountPath=/tmp/work, medium=Memory",
+    attributesHint: "Shared attribute defaults. Example: sizeLimit=2Gi"
+  },
+  extendedResources: {
+    instancesTitle: "Resource instances",
+    instancesHint: "Example: resource=example.com/license-a, quantity=2",
+    attributesHint: "Shared attribute defaults. Example: quantity=1"
   }
 };
+
+function selectedValueForField(selectedFields: SelectedField[], fieldId: string) {
+  return selectedFields.find((selected) => selected.fieldId === fieldId)?.value;
+}
+
+function fieldMatchesDependencies(field: Field, selectedFields: SelectedField[]) {
+  if (!field.dependsOn?.length) {
+    return true;
+  }
+
+  return field.dependsOn.every((dependency) => {
+    const selectedValue = selectedValueForField(selectedFields, dependency.fieldId);
+
+    if (typeof selectedValue !== "string") {
+      return false;
+    }
+
+    return dependency.values.includes(selectedValue);
+  });
+}
+
+function isFieldAvailable(field: Field, workloadId: string, selectedFields: SelectedField[]) {
+  return field.supportedWorkloads.includes(workloadId) && fieldMatchesDependencies(field, selectedFields);
+}
 
 function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -87,7 +166,7 @@ function App() {
     setSelectedFields((current) =>
       current.filter((selected) => {
         const field = catalog.fields.find((item) => item.id === selected.fieldId);
-        return field ? field.supportedWorkloads.includes(selectedWorkload) : false;
+        return field ? isFieldAvailable(field, selectedWorkload, current) : false;
       })
     );
   }, [catalog, selectedWorkload]);
@@ -101,10 +180,10 @@ function App() {
       catalog.fields.some(
         (field) =>
           field.sectionId === section.id &&
-          field.supportedWorkloads.includes(selectedWorkload)
+          isFieldAvailable(field, selectedWorkload, selectedFields)
       )
     );
-  }, [catalog, selectedWorkload]);
+  }, [catalog, selectedFields, selectedWorkload]);
 
   useEffect(() => {
     if (activeStep === "workload" || activeStep === "review") {
@@ -156,8 +235,8 @@ function App() {
       return 0;
     }
 
-    return catalog.fields.filter((field) => field.supportedWorkloads.includes(selectedWorkload)).length;
-  }, [catalog, selectedWorkload]);
+    return catalog.fields.filter((field) => isFieldAvailable(field, selectedWorkload, selectedFields)).length;
+  }, [catalog, selectedFields, selectedWorkload]);
 
   const availableFields = useMemo(() => {
     if (!catalog || activeStep === "workload" || activeStep === "review") {
@@ -165,10 +244,10 @@ function App() {
     }
 
     return catalog.fields.filter(
-      (field) =>
-        field.sectionId === activeStep &&
-        field.supportedWorkloads.includes(selectedWorkload) &&
-        !selectedFields.some((selected) => selected.fieldId === field.id)
+        (field) =>
+          field.sectionId === activeStep &&
+          isFieldAvailable(field, selectedWorkload, selectedFields) &&
+          !selectedFields.some((selected) => selected.fieldId === field.id)
     );
   }, [activeStep, catalog, selectedFields, selectedWorkload]);
 

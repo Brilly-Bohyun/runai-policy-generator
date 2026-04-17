@@ -37,6 +37,10 @@ export type Field = {
   supportedWorkloads: string[];
   valueType: string;
   scopeByWorkload?: Record<string, "top-level" | "role">;
+  dependsOn?: Array<{
+    fieldId: string;
+    values: string[];
+  }>;
   placeholder?: string;
   defaultValue?: string | number | boolean;
   options?: string[];

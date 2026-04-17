@@ -1,28 +1,93 @@
-import type { Catalog } from "./types";
+import type { Catalog, Field, FieldSetting } from "./types";
 
 const workspace = "workspace";
 const standardTraining = "standardTraining";
 const distributedTraining = "distributedTraining";
 const inference = "inference";
 const distributedInference = "distributedInference";
-const nimService = "nimService";
 
 const allWorkloads = [
   workspace,
   standardTraining,
   distributedTraining,
   inference,
-  distributedInference,
-  nimService
+  distributedInference
 ];
 
 const exceptNim = [workspace, standardTraining, distributedTraining, inference, distributedInference];
 const classicWorkloads = [workspace, standardTraining, distributedTraining, inference];
 const classicWithDistributedInference = [workspace, standardTraining, distributedTraining, inference, distributedInference];
 const interactiveAndTraining = [workspace, standardTraining, distributedTraining];
-const servingWorkloads = [inference, distributedInference, nimService];
+const servingWorkloads = [inference, distributedInference];
 
-export const catalog: Catalog = {
+const booleanRuleTemplate: FieldSetting[] = [
+  { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
+  { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the default value." }
+];
+
+const stringRuleTemplate: FieldSetting[] = [
+  { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
+  { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the default value." },
+  { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict the allowed values." }
+];
+
+const numericRuleTemplate: FieldSetting[] = [
+  { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
+  { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the default value." },
+  { id: "min", label: "Min", inputKind: "number", description: "Minimum allowed value." },
+  { id: "max", label: "Max", inputKind: "number", description: "Maximum allowed value." },
+  { id: "step", label: "Step", inputKind: "number", description: "Allowed gap between values." },
+  { id: "defaultFrom", label: "Default From", inputKind: "text", description: "Calculate a default from another field." }
+];
+
+const quantityRuleTemplate: FieldSetting[] = [
+  { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
+  { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the default value." },
+  { id: "min", label: "Min", inputKind: "text", description: "Minimum allowed value." },
+  { id: "max", label: "Max", inputKind: "text", description: "Maximum allowed value." },
+  { id: "defaultFrom", label: "Default From", inputKind: "text", description: "Calculate a default from another field." }
+];
+
+const arrayRuleTemplate: FieldSetting[] = [
+  { id: "required", label: "Required", inputKind: "boolean", description: "Require one or more values." },
+  { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the default values." }
+];
+
+const itemizedRuleTemplate: FieldSetting[] = [
+  { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional instances." },
+  { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding the default instances." }
+];
+
+function mergeSettings(existing: FieldSetting[] | undefined, defaults: FieldSetting[]) {
+  const byId = new Map<string, FieldSetting>();
+
+  defaults.forEach((setting) => byId.set(setting.id, setting));
+  existing?.forEach((setting) => byId.set(setting.id, setting));
+
+  return Array.from(byId.values());
+}
+
+function normalizeSettings(field: Field) {
+  switch (field.valueType) {
+    case "boolean":
+      return mergeSettings(field.settingsSchema, booleanRuleTemplate);
+    case "string":
+      return mergeSettings(field.settingsSchema, stringRuleTemplate);
+    case "integer":
+    case "number":
+      return mergeSettings(field.settingsSchema, numericRuleTemplate);
+    case "quantity":
+      return mergeSettings(field.settingsSchema, quantityRuleTemplate);
+    case "array":
+      return mergeSettings(field.settingsSchema, arrayRuleTemplate);
+    case "itemized":
+      return mergeSettings(field.settingsSchema, itemizedRuleTemplate);
+    default:
+      return field.settingsSchema ?? [];
+  }
+}
+
+const baseCatalog: Catalog = {
   workloadTypes: [
     {
       id: workspace,
@@ -55,12 +120,6 @@ export const catalog: Catalog = {
       description: "Leader and worker policy settings for distributed inference workloads.",
       highlights: ["Leader / worker", "Serving", "API-only fields"],
       scopeOptions: ["all", "leader", "worker"]
-    },
-    {
-      id: nimService,
-      label: "NIM Service",
-      description: "NVIDIA NIM service policy fields with service-level scaling and exposure.",
-      highlights: ["NIM service", "Serving port", "Replica policy"]
     }
   ],
   sections: [
@@ -229,7 +288,7 @@ export const catalog: Catalog = {
       impact: "Shapes runtime configuration and credentials wiring.",
       yamlPath: "environmentVariables",
       inputKind: "list",
-      valueType: "array",
+      valueType: "itemized",
       placeholder: "WANDB_API_KEY=REPLACE_ME, HF_HOME=/cache/hf",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
@@ -237,8 +296,8 @@ export const catalog: Catalog = {
         [distributedInference]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require environment variables to be present." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow modifications to the default values." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional environment variable instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
       ]
     },
     {
@@ -269,7 +328,7 @@ export const catalog: Catalog = {
       impact: "Useful for integrations and runtime annotations that need to travel with the workload.",
       yamlPath: "annotations",
       inputKind: "list",
-      valueType: "array",
+      valueType: "itemized",
       placeholder: "sidecar.istio.io/inject=false, team=vision",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
@@ -277,8 +336,8 @@ export const catalog: Catalog = {
         [distributedInference]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require annotations to be present." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the default annotations." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional annotation instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
       ]
     },
     {
@@ -289,7 +348,7 @@ export const catalog: Catalog = {
       impact: "Improves grouping and downstream policy matching.",
       yamlPath: "labels",
       inputKind: "list",
-      valueType: "array",
+      valueType: "itemized",
       placeholder: "team=ml-platform, env=prod",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
@@ -297,8 +356,8 @@ export const catalog: Catalog = {
         [distributedInference]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require labels to be present." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the label set." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional label instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
       ]
     },
     {
@@ -415,7 +474,7 @@ export const catalog: Catalog = {
       impact: "Allows workloads to land on tainted or specialized nodes.",
       yamlPath: "tolerations",
       inputKind: "list",
-      valueType: "array",
+      valueType: "itemized",
       placeholder: "gpu=true:NoSchedule, dedicated=ml:NoExecute",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
@@ -423,8 +482,8 @@ export const catalog: Catalog = {
         [distributedInference]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require tolerations to be present." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the tolerations." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional toleration instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
       ]
     },
     {
@@ -510,6 +569,26 @@ export const catalog: Catalog = {
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value for SHM behavior." },
         { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow toggling this setting." }
+      ]
+    },
+    {
+      id: "extendedResources",
+      label: "Extended Resources",
+      sectionId: "compute",
+      description: "Extended resource requests exposed through the compute section.",
+      impact: "Lets the policy define additional named resources and per-resource quantities.",
+      yamlPath: "compute.extendedResources",
+      inputKind: "list",
+      valueType: "itemized",
+      placeholder: "resource=example.com/license-a, quantity=2",
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional resource instances beyond the defaults." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding the listed resource instances." }
       ]
     },
     {
@@ -686,6 +765,25 @@ export const catalog: Catalog = {
       ]
     },
     {
+      id: "storageDataVolume",
+      label: "Storage Data Volume",
+      sectionId: "storage",
+      description: "Datasource-backed data volume mounts.",
+      impact: "Connects curated datasource assets to workload mount points.",
+      yamlPath: "storage.dataVolume",
+      inputKind: "list",
+      valueType: "itemized",
+      placeholder: "mountPath=/mnt/dataset, subPath=train",
+      supportedWorkloads: classicWorkloads,
+      scopeByWorkload: {
+        [distributedTraining]: "role"
+      },
+      settingsSchema: [
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow extra data volume instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing default data volume instances." }
+      ]
+    },
+    {
       id: "storagePvc",
       label: "Storage PVC",
       sectionId: "storage",
@@ -744,6 +842,25 @@ export const catalog: Catalog = {
       ]
     },
     {
+      id: "storageNfs",
+      label: "Storage NFS",
+      sectionId: "storage",
+      description: "NFS-backed volume mounts.",
+      impact: "Connects shared network file systems to workloads.",
+      yamlPath: "storage.nfs",
+      inputKind: "list",
+      valueType: "itemized",
+      placeholder: "server=nfs.company.local, path=/exports/data, mountPath=/mnt/nfs",
+      supportedWorkloads: classicWorkloads,
+      scopeByWorkload: {
+        [distributedTraining]: "role"
+      },
+      settingsSchema: [
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow extra NFS mounts." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing default NFS mounts." }
+      ]
+    },
+    {
       id: "storageConfigMapVolumes",
       label: "Storage ConfigMap Volumes",
       sectionId: "storage",
@@ -781,6 +898,26 @@ export const catalog: Catalog = {
       settingsSchema: [
         { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow extra secret volumes." },
         { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing default secret volumes." }
+      ]
+    },
+    {
+      id: "storageEmptyDir",
+      label: "Storage EmptyDir",
+      sectionId: "storage",
+      description: "Ephemeral emptyDir volumes mounted into the workload.",
+      impact: "Provides scratch space that lives for the lifetime of the pod.",
+      yamlPath: "storage.emptyDir",
+      inputKind: "list",
+      valueType: "itemized",
+      placeholder: "mountPath=/tmp/work, medium=Memory",
+      supportedWorkloads: classicWithDistributedInference,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow extra emptyDir volumes." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing default emptyDir volumes." }
       ]
     },
     {
@@ -880,6 +1017,43 @@ export const catalog: Catalog = {
       ]
     },
     {
+      id: "servingPortExposeExternally",
+      label: "Serving Port Expose Externally",
+      sectionId: "network",
+      description: "Whether the distributed inference serving URL is exposed externally.",
+      impact: "Controls whether the generated serving endpoint is externally reachable.",
+      yamlPath: "servingPort.exposeExternally",
+      inputKind: "boolean",
+      valueType: "boolean",
+      supportedWorkloads: [distributedInference],
+      scopeByWorkload: {
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit external exposure mode." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing external exposure." }
+      ]
+    },
+    {
+      id: "servingPortExposedUrl",
+      label: "Serving Port Exposed URL",
+      sectionId: "network",
+      description: "Preferred exposed URL for distributed inference serving.",
+      impact: "Lets administrators set a stable externally-facing serving URL.",
+      yamlPath: "servingPort.exposedUrl",
+      inputKind: "text",
+      valueType: "string",
+      placeholder: "https://inference.company.ai",
+      supportedWorkloads: [distributedInference],
+      scopeByWorkload: {
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an exposed URL if externally exposed." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the exposed URL." }
+      ]
+    },
+    {
       id: "servingPortClusterLocalAccessOnly",
       label: "Serving Port Cluster Local Only",
       sectionId: "network",
@@ -904,7 +1078,7 @@ export const catalog: Catalog = {
       inputKind: "number",
       valueType: "integer",
       defaultValue: 1,
-      supportedWorkloads: [inference, nimService],
+      supportedWorkloads: [inference],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a minimum replica count." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum allowed value." },
@@ -921,7 +1095,7 @@ export const catalog: Catalog = {
       inputKind: "number",
       valueType: "integer",
       defaultValue: 5,
-      supportedWorkloads: [inference, nimService],
+      supportedWorkloads: [inference],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a maximum replica count." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum allowed value." },
@@ -937,7 +1111,7 @@ export const catalog: Catalog = {
       yamlPath: "autoscaling.metricThreshold",
       inputKind: "number",
       valueType: "number",
-      supportedWorkloads: [inference, nimService],
+      supportedWorkloads: [inference],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a metric threshold." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum threshold." },
@@ -958,6 +1132,102 @@ export const catalog: Catalog = {
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a threshold percentage." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum percentage." },
         { id: "max", label: "Max", inputKind: "number", description: "Maximum percentage." }
+      ]
+    },
+    {
+      id: "autoscalingInitialReplicas",
+      label: "Autoscaling Initial Replicas",
+      sectionId: "network",
+      description: "Initial replica count when the workload is created for the first time.",
+      impact: "Controls the initial serving footprint before autoscaling reacts.",
+      yamlPath: "autoscaling.initialReplicas",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: [inference],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an initial replica count." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum initial replica count." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum initial replica count." }
+      ]
+    },
+    {
+      id: "autoscalingActivationReplicas",
+      label: "Autoscaling Activation Replicas",
+      sectionId: "network",
+      description: "Replica count used when scaling up from zero.",
+      impact: "Controls how many replicas appear immediately after a scale-from-zero event.",
+      yamlPath: "autoscaling.activationReplicas",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: [inference],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an activation replica count." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum activation replica count." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum activation replica count." }
+      ]
+    },
+    {
+      id: "autoscalingConcurrencyHardLimit",
+      label: "Autoscaling Concurrency Hard Limit",
+      sectionId: "network",
+      description: "Maximum number of requests allowed per replica.",
+      impact: "Caps per-replica traffic and influences scaling pressure.",
+      yamlPath: "autoscaling.concurrencyHardLimit",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: [inference],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a concurrency hard limit." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum concurrency limit." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum concurrency limit." }
+      ]
+    },
+    {
+      id: "autoscalingScaleToZeroRetentionSeconds",
+      label: "Autoscaling Scale-To-Zero Retention Seconds",
+      sectionId: "network",
+      description: "Minimum time the last replica stays active after a scale-to-zero decision.",
+      impact: "Avoids overly aggressive scale-to-zero behavior for bursty traffic.",
+      yamlPath: "autoscaling.scaleToZeroRetentionSeconds",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: [inference],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a retention interval." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum retention interval." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum retention interval." }
+      ]
+    },
+    {
+      id: "autoscalingScaleDownDelaySeconds",
+      label: "Autoscaling Scale Down Delay Seconds",
+      sectionId: "network",
+      description: "Minimum time a replica remains active after a scale-down decision.",
+      impact: "Reduces oscillation by slowing down rapid scale-down behavior.",
+      yamlPath: "autoscaling.scaleDownDelaySeconds",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: [inference],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a scale-down delay." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum delay." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum delay." }
+      ]
+    },
+    {
+      id: "autoscalingMetric",
+      label: "Autoscaling Metric",
+      sectionId: "network",
+      description: "Metric used for autoscaling decisions.",
+      impact: "Defines the autoscaling signal such as throughput, concurrency, latency, or a custom metric.",
+      yamlPath: "autoscaling.metric",
+      inputKind: "text",
+      valueType: "string",
+      placeholder: "throughput",
+      supportedWorkloads: [inference],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an autoscaling metric." },
+        { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict allowed metrics, for example throughput, concurrency, latency." }
       ]
     },
     {
@@ -1000,15 +1270,15 @@ export const catalog: Catalog = {
       impact: "Defines reachable network surfaces for the workload.",
       yamlPath: "ports",
       inputKind: "list",
-      valueType: "array",
+      valueType: "itemized",
       placeholder: "container.port=8888, serviceType=NodePort",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require at least one port." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the port list." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional port instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default port instances." }
       ]
     },
     {
@@ -1019,15 +1289,15 @@ export const catalog: Catalog = {
       impact: "Controls which endpoints are exposed to users.",
       yamlPath: "exposedUrls",
       inputKind: "list",
-      valueType: "array",
+      valueType: "itemized",
       placeholder: "https://demo.example.ai",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require at least one exposed URL." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the exposed URLs." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional exposed URL instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default URL instances." }
       ]
     },
     {
@@ -1038,15 +1308,15 @@ export const catalog: Catalog = {
       impact: "Adds supporting links without changing serving behavior.",
       yamlPath: "relatedUrls",
       inputKind: "list",
-      valueType: "array",
+      valueType: "itemized",
       placeholder: "https://grafana.example.ai/run-42",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require related URLs." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing them." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional related URL instances." },
+        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
       ]
     },
     {
@@ -1098,7 +1368,7 @@ export const catalog: Catalog = {
       inputKind: "list",
       valueType: "array",
       placeholder: "minReplicas=1, maxReplicas=5, metricThreshold=70",
-      supportedWorkloads: [inference, nimService],
+      supportedWorkloads: [inference],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require autoscaling configuration." },
         { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing autoscaling defaults." }
@@ -1404,6 +1674,7 @@ export const catalog: Catalog = {
       valueType: "string",
       options: ["AtStartup", "WaitForWorkersReady"],
       supportedWorkloads: [distributedTraining],
+      dependsOn: [{ fieldId: "distributedFramework", values: ["MPI"] }],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a launcher creation policy." },
         { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict launcher behavior values." }
@@ -1419,6 +1690,7 @@ export const catalog: Catalog = {
       inputKind: "number",
       valueType: "integer",
       supportedWorkloads: [distributedTraining],
+      dependsOn: [{ fieldId: "distributedFramework", values: ["MPI"] }],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require slots per worker." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum slots per worker." },
@@ -1452,7 +1724,7 @@ export const catalog: Catalog = {
       inputKind: "number",
       valueType: "integer",
       defaultValue: 1,
-      supportedWorkloads: [distributedInference, nimService],
+      supportedWorkloads: [distributedInference],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a replica count." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum replicas." },
@@ -1476,35 +1748,274 @@ export const catalog: Catalog = {
       ]
     },
     {
-      id: "multiNode",
-      label: "Multi Node",
-      sectionId: "distributed",
-      description: "Whether the NIM service runs in multi-node mode.",
-      impact: "Changes deployment topology for NIM services.",
-      yamlPath: "multiNode",
-      inputKind: "boolean",
-      valueType: "boolean",
-      supportedWorkloads: [nimService],
+      id: "PodAffinitySchedulingRule",
+      label: "Pod Affinity Scheduling Rule",
+      sectionId: "scheduling",
+      description: "Whether pod affinity is enforced as hard or soft.",
+      impact: "Changes how strictly the scheduler honors pod affinity constraints.",
+      yamlPath: "PodAffinitySchedulingRule",
+      inputKind: "select",
+      valueType: "string",
+      options: ["hard", "soft"],
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the value." }
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an affinity scheduling rule." },
+        { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict affinity scheduling values." }
       ]
     },
     {
-      id: "ngcAuthSecret",
-      label: "NGC Auth Secret",
-      sectionId: "distributed",
-      description: "Secret used to authenticate against NGC for NIM services.",
-      impact: "Controls access to required NVIDIA container content.",
-      yamlPath: "ngcAuthSecret",
+      id: "podAffinityTopology",
+      label: "Pod Affinity Topology",
+      sectionId: "scheduling",
+      description: "Topology key used by pod affinity scheduling.",
+      impact: "Changes which topology domain is used when evaluating pod affinity.",
+      yamlPath: "podAffinityTopology",
       inputKind: "text",
       valueType: "string",
-      placeholder: "ngc-api-key-secret",
-      supportedWorkloads: [nimService],
+      placeholder: "kubernetes.io/hostname",
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require an NGC auth secret." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the secret reference." }
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a topology key." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the topology key." }
+      ]
+    },
+    {
+      id: "autoDeletionTimeAfterCompletionSeconds",
+      label: "Auto Deletion After Completion",
+      sectionId: "lifecycle",
+      description: "Duration after which a finished workload is deleted automatically.",
+      impact: "Controls how long completed workloads remain available for debugging.",
+      yamlPath: "autoDeletionTimeAfterCompletionSeconds",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: interactiveAndTraining,
+      scopeByWorkload: {
+        [distributedTraining]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit deletion interval." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum retention interval." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum retention interval." }
+      ]
+    },
+    {
+      id: "terminationGracePeriodSeconds",
+      label: "Termination Grace Period Seconds",
+      sectionId: "lifecycle",
+      description: "Grace period before a preempted workload is forcibly terminated.",
+      impact: "Gives the workload time to checkpoint or exit cleanly before termination.",
+      yamlPath: "terminationGracePeriodSeconds",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: interactiveAndTraining,
+      scopeByWorkload: {
+        [distributedTraining]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a grace period." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum grace period." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum grace period." }
+      ]
+    },
+    {
+      id: "capabilities",
+      label: "Capabilities",
+      sectionId: "security",
+      description: "Linux capabilities granted to the workload container.",
+      impact: "Expands the container privilege surface in a granular way.",
+      yamlPath: "security.capabilities",
+      inputKind: "list",
+      valueType: "array",
+      placeholder: "NET_ADMIN, SYS_PTRACE",
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require capabilities to be explicitly set." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the capabilities." }
+      ]
+    },
+    {
+      id: "seccompProfileType",
+      label: "Seccomp Profile Type",
+      sectionId: "security",
+      description: "Seccomp profile type for the workload container.",
+      impact: "Changes syscall filtering behavior and runtime hardening.",
+      yamlPath: "security.seccompProfileType",
+      inputKind: "select",
+      valueType: "string",
+      options: ["RuntimeDefault", "Unconfined"],
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a seccomp profile type." },
+        { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict seccomp profile values." }
+      ]
+    },
+    {
+      id: "readOnlyRootFilesystem",
+      label: "Read Only Root Filesystem",
+      sectionId: "security",
+      description: "Whether the container root filesystem is mounted read-only.",
+      impact: "Strengthens container hardening but may break workloads that write to root paths.",
+      yamlPath: "security.readOnlyRootFilesystem",
+      inputKind: "boolean",
+      valueType: "boolean",
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the root filesystem mode." }
+      ]
+    },
+    {
+      id: "supplementalGroups",
+      label: "Supplemental Groups",
+      sectionId: "security",
+      description: "Supplemental group IDs applied to the workload container.",
+      impact: "Expands filesystem and device group access for the container.",
+      yamlPath: "security.supplementalGroups",
+      inputKind: "list",
+      valueType: "array",
+      placeholder: "1000, 1001",
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require supplemental groups." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the group list." }
+      ]
+    },
+    {
+      id: "hostIpc",
+      label: "Host IPC",
+      sectionId: "security",
+      description: "Whether the workload shares the host IPC namespace.",
+      impact: "Increases access to host-level inter-process communication resources.",
+      yamlPath: "security.hostIpc",
+      inputKind: "boolean",
+      valueType: "boolean",
+      supportedWorkloads: [workspace, standardTraining, distributedTraining],
+      scopeByWorkload: {
+        [distributedTraining]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing host IPC mode." }
+      ]
+    },
+    {
+      id: "hostNetwork",
+      label: "Host Network",
+      sectionId: "security",
+      description: "Whether the workload shares the host network namespace.",
+      impact: "Bypasses pod networking isolation and exposes host network behavior.",
+      yamlPath: "security.hostNetwork",
+      inputKind: "boolean",
+      valueType: "boolean",
+      supportedWorkloads: [workspace, standardTraining, distributedTraining],
+      scopeByWorkload: {
+        [distributedTraining]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing host networking mode." }
+      ]
+    },
+    {
+      id: "privileged",
+      label: "Privileged",
+      sectionId: "security",
+      description: "Whether the container runs in privileged mode.",
+      impact: "Greatly expands container access to host resources and should be tightly controlled.",
+      yamlPath: "privileged",
+      inputKind: "boolean",
+      valueType: "boolean",
+      supportedWorkloads: classicWorkloads,
+      scopeByWorkload: {
+        [distributedTraining]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit privileged mode value." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing privileged mode." }
+      ]
+    },
+    {
+      id: "sshAuthMountPath",
+      label: "SSH Auth Mount Path",
+      sectionId: "distributed",
+      description: "Directory where SSH auth material is mounted for MPI jobs.",
+      impact: "Controls where worker SSH keys appear inside distributed MPI workloads.",
+      yamlPath: "sshAuthMountPath",
+      inputKind: "text",
+      valueType: "string",
+      placeholder: "/root/.ssh",
+      supportedWorkloads: [distributedTraining],
+      dependsOn: [{ fieldId: "distributedFramework", values: ["MPI"] }],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an SSH auth mount path." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the mount path." }
+      ]
+    },
+    {
+      id: "minReplicas",
+      label: "Min Replicas",
+      sectionId: "distributed",
+      description: "Lower autoscaling bound for distributed training workers.",
+      impact: "Defines the minimum worker scale for distributed training autoscaling.",
+      yamlPath: "minReplicas",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: [distributedTraining],
+      dependsOn: [{ fieldId: "distributedFramework", values: ["PyTorch"] }],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a minimum replica count." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum allowed value." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum allowed value." }
+      ]
+    },
+    {
+      id: "maxReplicas",
+      label: "Max Replicas",
+      sectionId: "distributed",
+      description: "Upper autoscaling bound for distributed training workers.",
+      impact: "Caps distributed training worker scale under autoscaling.",
+      yamlPath: "maxReplicas",
+      inputKind: "number",
+      valueType: "integer",
+      supportedWorkloads: [distributedTraining],
+      dependsOn: [{ fieldId: "distributedFramework", values: ["PyTorch"] }],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a maximum replica count." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum allowed value." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum allowed value." }
       ]
     }
   ]
+};
+
+export const catalog: Catalog = {
+  ...baseCatalog,
+  fields: baseCatalog.fields.map((field) => ({
+    ...field,
+    settingsSchema: normalizeSettings(field)
+  }))
 };
