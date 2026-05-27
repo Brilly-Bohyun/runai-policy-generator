@@ -1,47 +1,26 @@
 :root {
   font-family: "Segoe UI", "Noto Sans KR", sans-serif;
   color: #142013;
-  background:
-    radial-gradient(circle at top left, rgba(118, 185, 0, 0.12), transparent 26%),
-    radial-gradient(circle at top right, rgba(118, 185, 0, 0.08), transparent 22%),
-    linear-gradient(160deg, #f8fcf3 0%, #f0f7e8 48%, #e8f1e0 100%);
+  background: #f7fbf3;
   line-height: 1.5;
   font-weight: 400;
-  --bg-panel: rgba(255, 255, 255, 0.96);
-  --bg-soft: rgba(255, 255, 255, 0.98);
-  --bg-accent: linear-gradient(145deg, #5ac42a 0%, #2d7f1f 100%);
-  --border: rgba(88, 126, 54, 0.16);
+  --bg-panel: #ffffff;
+  --bg-soft: #ffffff;
+  --bg-accent: #76b900;
+  --bg-green-soft: #eef7e6;
+  --border: #dce9d1;
   --text: #182619;
   --muted: #526451;
   --green: #76b900;
-  --green-bright: #92d628;
-  --green-soft: rgba(118, 185, 0, 0.16);
+  --green-dark: #315f13;
+  --green-soft: #e9f5df;
   --danger: #b33a3a;
-  --shadow: 0 20px 40px rgba(64, 89, 52, 0.1);
+  --shadow: 0 16px 36px rgba(57, 88, 45, 0.08);
   --code-bg: #f3f8ee;
   --code-text: #1f3120;
   --radius-panel: 10px;
   --radius-card: 8px;
   --radius-control: 4px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #e8f4e5;
-    background:
-      radial-gradient(circle at top left, rgba(137, 255, 92, 0.16), transparent 28%),
-      radial-gradient(circle at top right, rgba(46, 143, 36, 0.22), transparent 24%),
-      linear-gradient(145deg, #08110b 0%, #0c1910 42%, #122419 100%);
-    --bg-panel: rgba(13, 24, 16, 0.92);
-    --bg-soft: rgba(22, 42, 27, 0.85);
-    --border: rgba(140, 255, 110, 0.15);
-    --text: #eef7eb;
-    --muted: #9fb59c;
-    --danger: #ff8b8b;
-    --shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
-    --code-bg: #040905;
-    --code-text: #dff8cf;
-  }
 }
 
 * {
@@ -59,6 +38,14 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
 }
 
 button {
@@ -82,7 +69,6 @@ button {
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   background: var(--bg-panel);
-  backdrop-filter: blur(16px);
   box-shadow: var(--shadow);
 }
 
@@ -118,6 +104,16 @@ button {
   line-height: 1.05;
 }
 
+.brand-button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
 .brand-block p,
 .section-header p,
 .summary-card p,
@@ -134,8 +130,8 @@ button {
   margin-top: 24px;
   padding: 16px;
   border-radius: var(--radius-card);
-  background: linear-gradient(160deg, rgba(118, 185, 0, 0.18), rgba(205, 231, 172, 0.78));
-  border: 1px solid rgba(118, 185, 0, 0.16);
+  background: var(--bg-green-soft);
+  border: 1px solid var(--border);
 }
 
 .stepper {
@@ -151,7 +147,7 @@ button {
   border: 0;
   border-radius: var(--radius-card);
   padding: 12px 14px;
-  background: rgba(118, 185, 0, 0.06);
+  background: #f7fbf3;
   color: var(--text);
   text-align: left;
   font-size: 0.95rem;
@@ -163,13 +159,13 @@ button {
   width: 24px;
   height: 24px;
   border-radius: 999px;
-  background: rgba(118, 185, 0, 0.1);
+  background: var(--green-soft);
   font-size: 0.82rem;
 }
 
 .step.active {
   background: var(--bg-accent);
-  color: #051004;
+  color: #ffffff;
 }
 
 .section-header,
@@ -223,8 +219,8 @@ button {
 }
 
 .workload-card.selected {
-  border-color: rgba(118, 185, 0, 0.75);
-  box-shadow: inset 0 0 0 2px rgba(118, 185, 0, 0.14);
+  border-color: var(--green);
+  box-shadow: inset 0 0 0 2px var(--green-soft);
 }
 
 .pill-row {
@@ -237,14 +233,14 @@ button {
 .pill {
   border-radius: 999px;
   padding: 4px 8px;
-  background: rgba(118, 185, 0, 0.14);
-  color: #45661b;
+  background: var(--green-soft);
+  color: var(--green-dark);
   font-size: 0.72rem;
 }
 
 .pill.subtle {
-  background: rgba(118, 185, 0, 0.08);
-  color: #537126;
+  background: #f3f9ee;
+  color: var(--green-dark);
 }
 
 .primary,
@@ -263,8 +259,8 @@ button {
 }
 
 .secondary {
-  background: rgba(118, 185, 0, 0.12);
-  color: var(--text);
+  background: var(--green-soft);
+  color: var(--green-dark);
 }
 
 .ghost {
@@ -301,8 +297,8 @@ button {
 .hint-banner {
   margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid rgba(118, 185, 0, 0.12);
-  background: rgba(118, 185, 0, 0.06);
+  border: 1px solid var(--border);
+  background: #f7fbf3;
   border-radius: var(--radius-card);
 }
 
@@ -326,10 +322,10 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid rgba(118, 185, 0, 0.16);
+  border: 1px solid var(--border);
   border-radius: var(--radius-control);
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.92);
+  background: #ffffff;
   color: var(--text);
   font-size: 0.92rem;
 }
@@ -353,7 +349,7 @@ input[type="checkbox"] {
 .stat-grid div {
   border-radius: var(--radius-card);
   padding: 12px;
-  background: rgba(118, 185, 0, 0.1);
+  background: var(--green-soft);
 }
 
 .stat-grid strong,
@@ -385,7 +381,7 @@ pre {
 .warning-list {
   margin: 0;
   padding-left: 20px;
-  color: #ffc28d;
+  color: #7a4d00;
 }
 
 .error-text {
@@ -419,8 +415,8 @@ pre {
 .setting-card {
   padding: 12px;
   border-radius: var(--radius-card);
-  background: rgba(247, 251, 242, 0.96);
-  border: 1px solid rgba(118, 185, 0, 0.08);
+  background: #f7fbf3;
+  border: 1px solid var(--border);
 }
 
 .setting-card small {
@@ -434,7 +430,8 @@ pre {
 }
 
 .accent-card {
-  background: linear-gradient(160deg, rgba(118, 185, 0, 0.25), rgba(31, 55, 18, 0.9));
+  background: var(--green-soft);
+  border-color: #b9d8a5;
 }
 
 .insight-list {
@@ -445,8 +442,8 @@ pre {
 .insight-card {
   padding: 14px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.22);
-  border: 1px solid rgba(172, 255, 121, 0.08);
+  background: #ffffff;
+  border: 1px solid var(--border);
 }
 
 .insight-header code {
@@ -464,19 +461,6 @@ pre {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-@media (prefers-color-scheme: light) {
-  .accent-card {
-    background: linear-gradient(160deg, rgba(208, 228, 176, 0.95), rgba(96, 128, 63, 0.92));
-  }
-
-  .accent-card h2,
-  .accent-card strong,
-  .accent-card span,
-  .accent-card p {
-    color: #162215;
-  }
 }
 
 @media (max-width: 1100px) {

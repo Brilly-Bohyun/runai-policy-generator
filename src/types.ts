@@ -35,14 +35,18 @@ export type Field = {
   yamlPath: string;
   inputKind: "text" | "number" | "select" | "list" | "boolean";
   supportedWorkloads: string[];
-  valueType: string;
+  valueType: "array" | "boolean" | "integer" | "itemized" | "number" | "object" | "objectArray" | "quantity" | "string";
   scopeByWorkload?: Record<string, "top-level" | "role">;
   dependsOn?: Array<{
     fieldId: string;
     values: string[];
   }>;
   placeholder?: string;
+  placeholderByWorkload?: Record<string, string>;
   defaultValue?: string | number | boolean;
+  itemKey?: string;
+  itemRequiredKeys?: string[];
+  itemRequiredAnyKeys?: string[];
   options?: string[];
   ruleHints?: string[];
   settingsSchema?: FieldSetting[];
@@ -74,6 +78,7 @@ export type GenerateResponse = {
   warnings: string[];
   summary: {
     selectedFieldCount: number;
+    renderedFieldCount: number;
     ruleCount: number;
     assetCount: number;
     humanSummary: string;

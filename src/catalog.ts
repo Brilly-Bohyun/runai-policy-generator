@@ -5,20 +5,23 @@ const standardTraining = "standardTraining";
 const distributedTraining = "distributedTraining";
 const inference = "inference";
 const distributedInference = "distributedInference";
+const nim = "nim";
 
 const allWorkloads = [
   workspace,
   standardTraining,
   distributedTraining,
   inference,
-  distributedInference
+  distributedInference,
+  nim
 ];
 
 const exceptNim = [workspace, standardTraining, distributedTraining, inference, distributedInference];
 const classicWorkloads = [workspace, standardTraining, distributedTraining, inference];
 const classicWithDistributedInference = [workspace, standardTraining, distributedTraining, inference, distributedInference];
 const interactiveAndTraining = [workspace, standardTraining, distributedTraining];
-const servingWorkloads = [inference, distributedInference];
+const servingWorkloads = [inference, distributedInference, nim];
+const inferenceAndNim = [inference, nim];
 
 const booleanRuleTemplate: FieldSetting[] = [
   { id: "required", label: "Required", inputKind: "boolean", description: "Require an explicit value." },
@@ -55,7 +58,8 @@ const arrayRuleTemplate: FieldSetting[] = [
 
 const itemizedRuleTemplate: FieldSetting[] = [
   { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional instances." },
-  { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding the default instances." }
+  { id: "locked", label: "Locked Keys", inputKind: "text", description: "Comma or newline separated item keys that cannot be edited or excluded." },
+  { id: "attributeRules", label: "Attribute Rules", inputKind: "text", description: "One rule per line, such as quantity.required=true or url.options=value=https://example.com." }
 ];
 
 function mergeSettings(existing: FieldSetting[] | undefined, defaults: FieldSetting[]) {
@@ -64,7 +68,16 @@ function mergeSettings(existing: FieldSetting[] | undefined, defaults: FieldSett
   defaults.forEach((setting) => byId.set(setting.id, setting));
   existing?.forEach((setting) => byId.set(setting.id, setting));
 
-  return Array.from(byId.values());
+  return Array.from(byId.values()).map((setting) =>
+    setting.id === "locked"
+      ? {
+          ...setting,
+          label: "Locked Keys",
+          inputKind: "text" as const,
+          description: "Comma or newline separated item keys that cannot be edited or excluded."
+        }
+      : setting
+  );
 }
 
 function normalizeSettings(field: Field) {
@@ -79,6 +92,7 @@ function normalizeSettings(field: Field) {
     case "quantity":
       return mergeSettings(field.settingsSchema, quantityRuleTemplate);
     case "array":
+    case "objectArray":
       return mergeSettings(field.settingsSchema, arrayRuleTemplate);
     case "itemized":
       return mergeSettings(field.settingsSchema, itemizedRuleTemplate);
@@ -120,6 +134,12 @@ const baseCatalog: Catalog = {
       description: "Leader and worker policy settings for distributed inference workloads.",
       highlights: ["Leader / worker", "Serving", "API-only fields"],
       scopeOptions: ["all", "leader", "worker"]
+    },
+    {
+      id: nim,
+      label: "NVIDIA NIM Service",
+      description: "API-only policies for NVIDIA NIM service deployments.",
+      highlights: ["NIM", "API-only", "Serving"]
     }
   ],
   sections: [
@@ -145,8 +165,13 @@ const baseCatalog: Catalog = {
     },
     {
       id: "network",
-      label: "Network & Serving",
-      description: "Exposed URLs, serving ports, autoscaling, and service configuration."
+      label: "Network",
+      description: "Ports, exported URLs, related links, and health probe configuration."
+    },
+    {
+      id: "serving",
+      label: "Serving",
+      description: "Inference serving ports, autoscaling, and service configuration."
     },
     {
       id: "security",
@@ -289,7 +314,9 @@ const baseCatalog: Catalog = {
       yamlPath: "environmentVariables",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "WANDB_API_KEY=REPLACE_ME, HF_HOME=/cache/hf",
+      itemRequiredKeys: ["name"],
+      itemRequiredAnyKeys: ["value", "secret", "configMap", "podFieldRef", "userCredential"],
+      placeholder: "name=WANDB_API_KEY, value=REPLACE_ME",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -308,8 +335,8 @@ const baseCatalog: Catalog = {
       impact: "Controls private registry access for the workload runtime.",
       yamlPath: "imagePullSecrets",
       inputKind: "list",
-      valueType: "array",
-      placeholder: "nvcr-pull-secret, team-registry-secret",
+      valueType: "objectArray",
+      placeholder: "name=nvcr-pull-secret, userCredential=false, exclude=false",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -329,7 +356,8 @@ const baseCatalog: Catalog = {
       yamlPath: "annotations",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "sidecar.istio.io/inject=false, team=vision",
+      itemRequiredKeys: ["name", "value"],
+      placeholder: "name=sidecar.istio.io/inject, value=false",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -349,7 +377,8 @@ const baseCatalog: Catalog = {
       yamlPath: "labels",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "team=ml-platform, env=prod",
+      itemRequiredKeys: ["name", "value"],
+      placeholder: "name=team, value=ml-platform",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -454,8 +483,8 @@ const baseCatalog: Catalog = {
       impact: "Hard constraints can prevent scheduling until matching nodes are available.",
       yamlPath: "nodeAffinityRequired",
       inputKind: "list",
-      valueType: "array",
-      placeholder: "node.kubernetes.io/instance-type=g5.4xlarge",
+      valueType: "object",
+      placeholder: "key=run.ai/type, operator=In, values=training|inference",
       supportedWorkloads: exceptNim,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -475,7 +504,7 @@ const baseCatalog: Catalog = {
       yamlPath: "tolerations",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "gpu=true:NoSchedule, dedicated=ml:NoExecute",
+      placeholder: "key=gpu, operator=Equal, value=true, effect=NoSchedule",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -515,7 +544,7 @@ const baseCatalog: Catalog = {
       sectionId: "compute",
       description: "Requested number of GPUs for the workload.",
       impact: "Strongly determines GPU allocation and cost.",
-      yamlPath: "compute.gpuDeviceRequest",
+      yamlPath: "compute.gpuDevicesRequest",
       inputKind: "number",
       valueType: "integer",
       defaultValue: 1,
@@ -536,12 +565,12 @@ const baseCatalog: Catalog = {
       id: "gpuRequestType",
       label: "GPU Request Type",
       sectionId: "compute",
-      description: "Specifies whether the GPU request is by device or portion.",
+      description: "Specifies whether GPU allocation uses portion or memory semantics.",
       impact: "Changes how GPU allocation is interpreted by the workload runtime.",
       yamlPath: "compute.gpuRequestType",
       inputKind: "select",
       valueType: "string",
-      options: ["device", "portion"],
+      options: ["portion", "memory"],
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -550,6 +579,27 @@ const baseCatalog: Catalog = {
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a GPU request type." },
         { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict the request type." }
+      ]
+    },
+    {
+      id: "migProfile",
+      label: "MIG Profile",
+      sectionId: "compute",
+      description: "Specifies the NVIDIA MIG profile to use when the GPU request type is migProfile.",
+      impact: "Constrains GPU allocation to a specific MIG profile such as 1g.5gb.",
+      yamlPath: "compute.migProfile",
+      inputKind: "text",
+      valueType: "string",
+      placeholder: "1g.5gb",
+      supportedWorkloads: exceptNim,
+      scopeByWorkload: {
+        [distributedTraining]: "role",
+        [distributedInference]: "role"
+      },
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a MIG profile." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow editing the MIG profile." },
+        { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict allowed MIG profiles." }
       ]
     },
     {
@@ -773,7 +823,7 @@ const baseCatalog: Catalog = {
       yamlPath: "storage.dataVolume",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "mountPath=/mnt/dataset, subPath=train",
+      placeholder: "id=123e4567-e89b-12d3-a456-426614174000, mountPath=/mnt/dataset, subPath=train",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
@@ -792,7 +842,7 @@ const baseCatalog: Catalog = {
       yamlPath: "storage.pvc",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "claimName=team-data, mountPath=/mnt/data",
+      placeholder: "claimName=team-data, path=/mnt/data, readOnly=false, claimInfo.storageClass=fast",
       supportedWorkloads: classicWithDistributedInference,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -812,7 +862,7 @@ const baseCatalog: Catalog = {
       yamlPath: "storage.git",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "repository=https://github.com/org/repo, revision=main, mountPath=/workspace/repo",
+      placeholder: "repository=https://github.com/org/repo, branch=main, path=/workspace/repo",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
@@ -831,8 +881,8 @@ const baseCatalog: Catalog = {
       yamlPath: "storage.s3",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "bucket=my-bucket, mountPath=/mnt/s3",
-      supportedWorkloads: [workspace, standardTraining, distributedTraining],
+      placeholder: "bucket=my-bucket, path=/mnt/s3, url=https://s3.amazonaws.com",
+      supportedWorkloads: interactiveAndTraining,
       scopeByWorkload: {
         [distributedTraining]: "role"
       },
@@ -850,7 +900,7 @@ const baseCatalog: Catalog = {
       yamlPath: "storage.nfs",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "server=nfs.company.local, path=/exports/data, mountPath=/mnt/nfs",
+      placeholder: "server=nfs.company.local, path=/exports/data, mountPath=/mnt/nfs, readOnly=true",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
@@ -869,7 +919,7 @@ const baseCatalog: Catalog = {
       yamlPath: "storage.configMapVolumes",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "name=app-config, mountPath=/etc/config",
+      placeholder: "name=app-config-volume, configMap=app-config, mountPath=/etc/config, defaultMode=0644",
       supportedWorkloads: classicWithDistributedInference,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -889,7 +939,7 @@ const baseCatalog: Catalog = {
       yamlPath: "storage.secretVolume",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "secretName=api-keys, mountPath=/run/secrets",
+      placeholder: "name=api-secret-volume, secret=api-keys, mountPath=/run/secrets, defaultMode=0400",
       supportedWorkloads: classicWithDistributedInference,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -902,14 +952,14 @@ const baseCatalog: Catalog = {
     },
     {
       id: "storageEmptyDir",
-      label: "Storage EmptyDir",
+      label: "Storage EmptyDir Volume",
       sectionId: "storage",
       description: "Ephemeral emptyDir volumes mounted into the workload.",
       impact: "Provides scratch space that lives for the lifetime of the pod.",
-      yamlPath: "storage.emptyDir",
+      yamlPath: "storage.emptyDirVolume",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "mountPath=/tmp/work, medium=Memory",
+      placeholder: "path=/tmp/work, medium=Memory, sizeLimit=2Gi",
       supportedWorkloads: classicWithDistributedInference,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -923,14 +973,14 @@ const baseCatalog: Catalog = {
     {
       id: "servingPortContainerPort",
       label: "Serving Port Container Port",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Container port exposed by the serving endpoint.",
       impact: "Defines the internal serving port for traffic routing.",
       yamlPath: "servingPort.container.port",
       inputKind: "number",
       valueType: "integer",
       placeholder: "8000",
-      supportedWorkloads: servingWorkloads,
+      supportedWorkloads: [inference, distributedInference],
       scopeByWorkload: {
         [distributedInference]: "role"
       },
@@ -941,9 +991,26 @@ const baseCatalog: Catalog = {
       ]
     },
     {
+      id: "servingPortPort",
+      label: "Serving Port",
+      sectionId: "serving",
+      description: "Main port exposed by the NIM serving endpoint.",
+      impact: "Defines the primary NIM service port used for serving traffic.",
+      yamlPath: "servingPort.port",
+      inputKind: "number",
+      valueType: "integer",
+      placeholder: "8000",
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a NIM serving port." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum serving port." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum serving port." }
+      ]
+    },
+    {
       id: "servingPortProtocol",
       label: "Serving Port Protocol",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Protocol used by the serving port.",
       impact: "Changes how clients communicate with the inference endpoint.",
       yamlPath: "servingPort.protocol",
@@ -962,7 +1029,7 @@ const baseCatalog: Catalog = {
     {
       id: "servingPortAuthorizationType",
       label: "Serving Port Authorization Type",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Authorization mode for serving URL access.",
       impact: "Controls whether serving access is public or restricted to specific users or groups.",
       yamlPath: "servingPort.authorizationType",
@@ -981,7 +1048,7 @@ const baseCatalog: Catalog = {
     {
       id: "servingPortAuthorizedUsers",
       label: "Serving Port Authorized Users",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Users allowed to access the serving URL.",
       impact: "Restricts serving access to an explicit user allowlist.",
       yamlPath: "servingPort.authorizedUsers",
@@ -1000,7 +1067,7 @@ const baseCatalog: Catalog = {
     {
       id: "servingPortAuthorizedGroups",
       label: "Serving Port Authorized Groups",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Groups allowed to access the serving URL.",
       impact: "Restricts serving access to an explicit group allowlist.",
       yamlPath: "servingPort.authorizedGroups",
@@ -1019,13 +1086,13 @@ const baseCatalog: Catalog = {
     {
       id: "servingPortExposeExternally",
       label: "Serving Port Expose Externally",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Whether the distributed inference serving URL is exposed externally.",
       impact: "Controls whether the generated serving endpoint is externally reachable.",
       yamlPath: "servingPort.exposeExternally",
       inputKind: "boolean",
       valueType: "boolean",
-      supportedWorkloads: [distributedInference],
+      supportedWorkloads: [distributedInference, nim],
       scopeByWorkload: {
         [distributedInference]: "role"
       },
@@ -1037,14 +1104,14 @@ const baseCatalog: Catalog = {
     {
       id: "servingPortExposedUrl",
       label: "Serving Port Exposed URL",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Preferred exposed URL for distributed inference serving.",
       impact: "Lets administrators set a stable externally-facing serving URL.",
       yamlPath: "servingPort.exposedUrl",
       inputKind: "text",
       valueType: "string",
       placeholder: "https://inference.company.ai",
-      supportedWorkloads: [distributedInference],
+      supportedWorkloads: [distributedInference, nim],
       scopeByWorkload: {
         [distributedInference]: "role"
       },
@@ -1054,9 +1121,76 @@ const baseCatalog: Catalog = {
       ]
     },
     {
+      id: "servingPortServiceType",
+      label: "Serving Port Service Type",
+      sectionId: "serving",
+      description: "Kubernetes service type used for a NIM serving endpoint.",
+      impact: "Controls the service object shape used to expose the NIM service inside or outside the cluster.",
+      yamlPath: "servingPort.serviceType",
+      inputKind: "select",
+      valueType: "string",
+      defaultValue: "ClusterIP",
+      options: ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"],
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a service type." },
+        { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict service type values." }
+      ]
+    },
+    {
+      id: "servingPortGrpcPort",
+      label: "Serving Port GRPC Port",
+      sectionId: "serving",
+      description: "GRPC port exposed by the NIM container.",
+      impact: "Enables GRPC serving alongside or instead of HTTP serving for NIM workloads.",
+      yamlPath: "servingPort.grpcPort",
+      inputKind: "number",
+      valueType: "integer",
+      placeholder: "9000",
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a GRPC port." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum GRPC port." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum GRPC port." }
+      ]
+    },
+    {
+      id: "servingPortMetricsPort",
+      label: "Serving Port Metrics Port",
+      sectionId: "serving",
+      description: "Metrics port exposed by the NIM container.",
+      impact: "Allows policy defaults and rules for NIM metrics scraping endpoints.",
+      yamlPath: "servingPort.metricsPort",
+      inputKind: "number",
+      valueType: "integer",
+      placeholder: "9090",
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a metrics port." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum metrics port." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum metrics port." }
+      ]
+    },
+    {
+      id: "servingPortExposedProtocol",
+      label: "Serving Port Exposed Protocol",
+      sectionId: "serving",
+      description: "Protocol used for the exposed NIM URL.",
+      impact: "Controls whether the generated exposed URL speaks HTTP or GRPC.",
+      yamlPath: "servingPort.exposedProtocol",
+      inputKind: "select",
+      valueType: "string",
+      options: ["http", "grpc"],
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an exposed protocol." },
+        { id: "options", label: "Allowed Values", inputKind: "text", description: "Restrict exposed protocol values." }
+      ]
+    },
+    {
       id: "servingPortClusterLocalAccessOnly",
       label: "Serving Port Cluster Local Only",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Whether the serving URL is only available on the cluster-local network.",
       impact: "Restricts exposure to internal cluster traffic.",
       yamlPath: "servingPort.clusterLocalAccessOnly",
@@ -1071,14 +1205,14 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingMinReplicas",
       label: "Autoscaling Min Replicas",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Minimum replica count for autoscaling.",
       impact: "Defines the autoscaling floor and whether scale-to-zero is possible.",
       yamlPath: "autoscaling.minReplicas",
       inputKind: "number",
       valueType: "integer",
       defaultValue: 1,
-      supportedWorkloads: [inference],
+      supportedWorkloads: inferenceAndNim,
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a minimum replica count." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum allowed value." },
@@ -1088,14 +1222,14 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingMaxReplicas",
       label: "Autoscaling Max Replicas",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Maximum replica count for autoscaling.",
       impact: "Caps autoscaling growth under traffic spikes.",
       yamlPath: "autoscaling.maxReplicas",
       inputKind: "number",
       valueType: "integer",
       defaultValue: 5,
-      supportedWorkloads: [inference],
+      supportedWorkloads: inferenceAndNim,
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a maximum replica count." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum allowed value." },
@@ -1105,13 +1239,13 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingMetricThreshold",
       label: "Autoscaling Metric Threshold",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Metric threshold used for autoscaling.",
       impact: "Changes how aggressively inference services scale with load.",
       yamlPath: "autoscaling.metricThreshold",
       inputKind: "number",
-      valueType: "number",
-      supportedWorkloads: [inference],
+      valueType: "integer",
+      supportedWorkloads: inferenceAndNim,
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a metric threshold." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum threshold." },
@@ -1121,7 +1255,7 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingMetricThresholdPercentage",
       label: "Autoscaling Metric Threshold Percentage",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Percentage of the threshold value used by autoscaling.",
       impact: "Adjusts autoscaling sensitivity for supported inference metrics.",
       yamlPath: "autoscaling.metricThresholdPercentage",
@@ -1137,7 +1271,7 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingInitialReplicas",
       label: "Autoscaling Initial Replicas",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Initial replica count when the workload is created for the first time.",
       impact: "Controls the initial serving footprint before autoscaling reacts.",
       yamlPath: "autoscaling.initialReplicas",
@@ -1153,7 +1287,7 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingActivationReplicas",
       label: "Autoscaling Activation Replicas",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Replica count used when scaling up from zero.",
       impact: "Controls how many replicas appear immediately after a scale-from-zero event.",
       yamlPath: "autoscaling.activationReplicas",
@@ -1169,7 +1303,7 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingConcurrencyHardLimit",
       label: "Autoscaling Concurrency Hard Limit",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Maximum number of requests allowed per replica.",
       impact: "Caps per-replica traffic and influences scaling pressure.",
       yamlPath: "autoscaling.concurrencyHardLimit",
@@ -1185,7 +1319,7 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingScaleToZeroRetentionSeconds",
       label: "Autoscaling Scale-To-Zero Retention Seconds",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Minimum time the last replica stays active after a scale-to-zero decision.",
       impact: "Avoids overly aggressive scale-to-zero behavior for bursty traffic.",
       yamlPath: "autoscaling.scaleToZeroRetentionSeconds",
@@ -1201,7 +1335,7 @@ const baseCatalog: Catalog = {
     {
       id: "autoscalingScaleDownDelaySeconds",
       label: "Autoscaling Scale Down Delay Seconds",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Minimum time a replica remains active after a scale-down decision.",
       impact: "Reduces oscillation by slowing down rapid scale-down behavior.",
       yamlPath: "autoscaling.scaleDownDelaySeconds",
@@ -1215,9 +1349,26 @@ const baseCatalog: Catalog = {
       ]
     },
     {
+      id: "autoscalingScaleWindowSeconds",
+      label: "Autoscaling Scale Window Seconds",
+      sectionId: "serving",
+      description: "Time window in seconds used for NIM autoscaling decisions.",
+      impact: "Controls how much recent traffic history is considered before scaling a NIM service.",
+      yamlPath: "autoscaling.scaleWindowSeconds",
+      inputKind: "number",
+      valueType: "integer",
+      defaultValue: 300,
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a scaling window." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum scaling window." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum scaling window." }
+      ]
+    },
+    {
       id: "autoscalingMetric",
       label: "Autoscaling Metric",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Metric used for autoscaling decisions.",
       impact: "Defines the autoscaling signal such as throughput, concurrency, latency, or a custom metric.",
       yamlPath: "autoscaling.metric",
@@ -1233,7 +1384,7 @@ const baseCatalog: Catalog = {
     {
       id: "servingConfigurationInitializationTimeoutSeconds",
       label: "Serving Init Timeout",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Maximum initialization time before inference is marked failed.",
       impact: "Controls how long cold starts may take before they are treated as failed.",
       yamlPath: "servingConfiguration.initializationTimeoutSeconds",
@@ -1249,7 +1400,7 @@ const baseCatalog: Catalog = {
     {
       id: "servingConfigurationRequestTimeoutSeconds",
       label: "Serving Request Timeout",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Maximum request processing time before the request is ignored.",
       impact: "Sets an upper bound for per-request latency.",
       yamlPath: "servingConfiguration.requestTimeoutSeconds",
@@ -1271,7 +1422,7 @@ const baseCatalog: Catalog = {
       yamlPath: "ports",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "container.port=8888, serviceType=NodePort",
+      placeholder: "container=8888, serviceType=NodePort, toolName=Jupyter",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
@@ -1290,7 +1441,8 @@ const baseCatalog: Catalog = {
       yamlPath: "exposedUrls",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "https://demo.example.ai",
+      itemKey: "url",
+      placeholder: "url=https://demo.example.ai",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
@@ -1309,7 +1461,8 @@ const baseCatalog: Catalog = {
       yamlPath: "relatedUrls",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "https://grafana.example.ai/run-42",
+      itemKey: "url",
+      placeholder: "url=https://grafana.example.ai/run-42",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"
@@ -1327,8 +1480,8 @@ const baseCatalog: Catalog = {
       impact: "Controls when traffic is allowed to reach the workload.",
       yamlPath: "probes",
       inputKind: "list",
-      valueType: "array",
-      placeholder: "readiness.path=/healthz, readiness.port=8080",
+      valueType: "object",
+      placeholder: "readiness.path=/healthz, readiness.port=8080, readiness.initialDelaySeconds=5",
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
@@ -1342,13 +1495,16 @@ const baseCatalog: Catalog = {
     {
       id: "servingPort",
       label: "Serving Port",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Serving endpoint configuration for inference-like workloads.",
       impact: "Defines the main inference service endpoint shape.",
       yamlPath: "servingPort",
       inputKind: "list",
-      valueType: "array",
+      valueType: "object",
       placeholder: "container.port=8000, protocol=http, authorizationType=public",
+      placeholderByWorkload: {
+        [nim]: "port=8000, serviceType=ClusterIP, grpcPort=8001, metricsPort=8002, exposeExternally=true, exposedProtocol=http"
+      },
       supportedWorkloads: servingWorkloads,
       scopeByWorkload: {
         [distributedInference]: "role"
@@ -1361,14 +1517,14 @@ const baseCatalog: Catalog = {
     {
       id: "autoscaling",
       label: "Autoscaling",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Autoscaling configuration for supported serving workloads.",
       impact: "Controls scaling floor, ceiling, and scaling strategy.",
       yamlPath: "autoscaling",
       inputKind: "list",
-      valueType: "array",
+      valueType: "object",
       placeholder: "minReplicas=1, maxReplicas=5, metricThreshold=70",
-      supportedWorkloads: [inference],
+      supportedWorkloads: inferenceAndNim,
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require autoscaling configuration." },
         { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing autoscaling defaults." }
@@ -1377,12 +1533,12 @@ const baseCatalog: Catalog = {
     {
       id: "servingConfiguration",
       label: "Serving Configuration",
-      sectionId: "network",
+      sectionId: "serving",
       description: "Inference serving timeout configuration.",
       impact: "Adjusts request and initialization timeout behavior.",
       yamlPath: "servingConfiguration",
       inputKind: "list",
-      valueType: "array",
+      valueType: "object",
       placeholder: "initializationTimeoutSeconds=600, requestTimeoutSeconds=120",
       supportedWorkloads: [inference],
       settingsSchema: [
@@ -1410,12 +1566,12 @@ const baseCatalog: Catalog = {
       ]
     },
     {
-      id: "runasGid",
+      id: "runAsGid",
       label: "Run As GID",
       sectionId: "security",
       description: "Unix group ID for the container.",
       impact: "Works with the UID to define filesystem group permissions.",
-      yamlPath: "security.runasGid",
+      yamlPath: "security.runAsGid",
       inputKind: "number",
       valueType: "integer",
       supportedWorkloads: allWorkloads,
@@ -1724,11 +1880,60 @@ const baseCatalog: Catalog = {
       inputKind: "number",
       valueType: "integer",
       defaultValue: 1,
-      supportedWorkloads: [distributedInference],
+      supportedWorkloads: [distributedInference, nim],
       settingsSchema: [
         { id: "required", label: "Required", inputKind: "boolean", description: "Require a replica count." },
         { id: "min", label: "Min", inputKind: "number", description: "Minimum replicas." },
         { id: "max", label: "Max", inputKind: "number", description: "Maximum replicas." }
+      ]
+    },
+    {
+      id: "multiNode",
+      label: "NIM Multi Node",
+      sectionId: "distributed",
+      description: "NIM multi-node deployment configuration.",
+      impact: "Controls whether the NIM service runs with worker nodes for models that need multiple compute nodes.",
+      yamlPath: "multiNode",
+      inputKind: "list",
+      valueType: "object",
+      placeholder: "workers=3",
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require multi-node configuration." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing multi-node configuration." }
+      ]
+    },
+    {
+      id: "multiNodeWorkers",
+      label: "NIM Multi Node Workers",
+      sectionId: "distributed",
+      description: "Number of NIM worker nodes.",
+      impact: "Runs the NIM service in multi-node mode when set to one or more workers.",
+      yamlPath: "multiNode.workers",
+      inputKind: "number",
+      valueType: "integer",
+      defaultValue: 1,
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require a worker count." },
+        { id: "min", label: "Min", inputKind: "number", description: "Minimum worker count." },
+        { id: "max", label: "Max", inputKind: "number", description: "Maximum worker count." }
+      ]
+    },
+    {
+      id: "ngcAuthSecret",
+      label: "NGC Auth Secret",
+      sectionId: "basic",
+      description: "Kubernetes secret containing the NGC API key for NIM services.",
+      impact: "Lets administrators require or default the NGC credential secret used by NIM deployments.",
+      yamlPath: "ngcAuthSecret",
+      inputKind: "text",
+      valueType: "string",
+      placeholder: "ngc-api-key-secret",
+      supportedWorkloads: [nim],
+      settingsSchema: [
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require an NGC auth secret." },
+        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changing the NGC auth secret." }
       ]
     },
     {
@@ -1892,7 +2097,7 @@ const baseCatalog: Catalog = {
       impact: "Expands filesystem and device group access for the container.",
       yamlPath: "security.supplementalGroups",
       inputKind: "list",
-      valueType: "array",
+      valueType: "string",
       placeholder: "1000, 1001",
       supportedWorkloads: exceptNim,
       scopeByWorkload: {

@@ -38,22 +38,22 @@ const itemizedGuidance: Record<
   tolerations: {
     instancesTitle: "Toleration instances",
     instancesHint: "Example: key=gpu, operator=Equal, value=true, effect=NoSchedule",
-    attributesHint: "Shared defaults. Example: effect=NoSchedule"
+    attributesHint: "Shared attribute defaults. Example: effect=NoSchedule"
   },
   ports: {
     instancesTitle: "Port instances",
     instancesHint: "Example: container=8888, serviceType=NodePort, toolName=Jupyter",
-    attributesHint: "Shared defaults. Example: serviceType=ClusterIP"
+    attributesHint: "Shared attribute defaults. Example: serviceType=ClusterIP"
   },
   exposedUrls: {
     instancesTitle: "Exposed URL instances",
     instancesHint: "Example: url=https://demo.company.ai",
-    attributesHint: "Shared defaults. Example: exclude=false"
+    attributesHint: "Shared attribute defaults. Example: exclude=false"
   },
   relatedUrls: {
     instancesTitle: "Related URL instances",
     instancesHint: "Example: url=https://grafana.company.ai/run-42",
-    attributesHint: "Shared defaults. Example: exclude=false"
+    attributesHint: "Shared attribute defaults. Example: exclude=false"
   },
   storageHostPath: {
     instancesTitle: "Mount instances",
@@ -62,22 +62,22 @@ const itemizedGuidance: Record<
   },
   storageDataVolume: {
     instancesTitle: "Data volume instances",
-    instancesHint: "Example: mountPath=/mnt/dataset, subPath=train",
+    instancesHint: "Example: id=123e4567-e89b-12d3-a456-426614174000, mountPath=/mnt/dataset, subPath=train",
     attributesHint: "Shared attribute defaults. Example: readOnly=true"
   },
   storagePvc: {
     instancesTitle: "PVC instances",
-    instancesHint: "Example: claimName=team-data, mountPath=/mnt/data",
+    instancesHint: "Example: claimName=team-data, path=/mnt/data, claimInfo.storageClass=fast",
     attributesHint: "Shared attribute defaults. Example: readOnly=true"
   },
   storageGit: {
     instancesTitle: "Git instances",
-    instancesHint: "Example: repository=https://github.com/org/repo, revision=main, mountPath=/workspace/repo",
+    instancesHint: "Example: repository=https://github.com/org/repo, branch=main, path=/workspace/repo",
     attributesHint: "Shared attribute defaults. Example: revision=main"
   },
   storageS3: {
     instancesTitle: "S3 instances",
-    instancesHint: "Example: bucket=my-bucket, mountPath=/mnt/s3",
+    instancesHint: "Example: bucket=my-bucket, path=/mnt/s3, url=https://s3.amazonaws.com",
     attributesHint: "Shared attribute defaults. Example: readOnly=true"
   },
   storageNfs: {
@@ -92,12 +92,12 @@ const itemizedGuidance: Record<
   },
   storageSecretVolume: {
     instancesTitle: "Secret instances",
-    instancesHint: "Example: secretName=api-keys, mountPath=/run/secrets",
+    instancesHint: "Example: secret=api-keys, mountPath=/run/secrets",
     attributesHint: "Shared attribute defaults. Example: readOnly=true"
   },
   storageEmptyDir: {
     instancesTitle: "EmptyDir instances",
-    instancesHint: "Example: mountPath=/tmp/work, medium=Memory",
+    instancesHint: "Example: mountPath=/tmp/work, medium=Memory, sizeLimit=2Gi",
     attributesHint: "Shared attribute defaults. Example: sizeLimit=2Gi"
   },
   extendedResources: {
@@ -129,6 +129,62 @@ function fieldMatchesDependencies(field: Field, selectedFields: SelectedField[])
 
 function isFieldAvailable(field: Field, workloadId: string, selectedFields: SelectedField[]) {
   return field.supportedWorkloads.includes(workloadId) && fieldMatchesDependencies(field, selectedFields);
+}
+
+function parseListInput(field: Field, rawValue: string) {
+  const trimmed = rawValue.trim();
+
+  if (!trimmed) {
+    return [];
+  }
+
+  if (looksLikeStructuredInput(trimmed)) {
+    return trimmed;
+  }
+
+  if (field.valueType === "objectArray") {
+    if (trimmed.includes("\n")) {
+      return trimmed
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    if (/[=:]/.test(trimmed)) {
+      return [trimmed];
+    }
+  }
+
+  return rawValue
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function looksLikeStructuredInput(value: string) {
+  const trimmed = value.trim();
+  return trimmed.startsWith("{") || trimmed.startsWith("-") || /^[\w.-]+:\s/m.test(trimmed);
+}
+
+function parseTextareaLines(rawValue: string) {
+  const trimmed = rawValue.trim();
+
+  if (!trimmed) {
+    return [];
+  }
+
+  if (looksLikeStructuredInput(trimmed)) {
+    return [trimmed];
+  }
+
+  return trimmed
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function sameSelectedFields(left: SelectedField[], right: SelectedField[]) {
+  return left.length === right.length && left.every((field, index) => field === right[index]);
 }
 
 function App() {
@@ -163,13 +219,15 @@ function App() {
       return;
     }
 
-    setSelectedFields((current) =>
-      current.filter((selected) => {
+    setSelectedFields((current) => {
+      const filtered = current.filter((selected) => {
         const field = catalog.fields.find((item) => item.id === selected.fieldId);
         return field ? isFieldAvailable(field, selectedWorkload, current) : false;
-      })
-    );
-  }, [catalog, selectedWorkload]);
+      });
+
+      return sameSelectedFields(current, filtered) ? current : filtered;
+    });
+  }, [catalog, selectedFields, selectedWorkload]);
 
   const sections = useMemo(() => {
     if (!catalog || !selectedWorkload) {
@@ -264,13 +322,11 @@ function App() {
     const baseValue =
       field.valueType === "itemized"
         ? { instances: [], attributes: [] }
-        : field.inputKind === "list"
+        : field.inputKind === "list" && (field.valueType === "array" || field.valueType === "objectArray")
         ? []
         : field.defaultValue !== undefined
           ? field.defaultValue
-          : field.inputKind === "boolean"
-            ? false
-            : "";
+          : "";
 
     setSelectedFields((current) => [
       ...current,
@@ -295,10 +351,7 @@ function App() {
     part: keyof ItemizedValue,
     rawValue: string
   ) {
-    const parsed = rawValue
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const parsed = parseTextareaLines(rawValue);
 
     setSelectedFields((current) =>
       current.map((field) => {
@@ -354,11 +407,43 @@ function App() {
 
   function updateImposedAssets(rawValue: string) {
     setImposedAssets(
-      rawValue
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean)
+      Array.from(
+        new Set(
+          rawValue
+            .split("\n")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        )
+      )
     );
+  }
+
+  function resetPolicyDraft(nextStep = "workload") {
+    setSelectedFields([]);
+    setImposedAssets([]);
+    setGenerated(null);
+    setCopied(false);
+    setActiveStep(nextStep);
+  }
+
+  function handleStepClick(stepId: string) {
+    if (stepId === "workload") {
+      resetPolicyDraft("workload");
+      return;
+    }
+
+    setActiveStep(stepId);
+  }
+
+  function handleWorkloadSelect(workloadId: string) {
+    if (workloadId !== selectedWorkload) {
+      setSelectedFields([]);
+      setImposedAssets([]);
+      setGenerated(null);
+      setCopied(false);
+    }
+
+    setSelectedWorkload(workloadId);
   }
 
   async function handleCopyYaml() {
@@ -375,6 +460,8 @@ function App() {
   }
 
   function renderValueInput(field: Field, selected: SelectedField) {
+    const placeholder = field.placeholderByWorkload?.[selectedWorkload] ?? field.placeholder;
+
     if (field.inputKind === "select") {
       return (
         <select
@@ -396,21 +483,29 @@ function App() {
         <input
           type="number"
           value={String(selected.value)}
-          onChange={(event) => updateFieldValue(field.id, Number(event.target.value))}
+          onChange={(event) =>
+            updateFieldValue(field.id, event.target.value === "" ? "" : Number(event.target.value))
+          }
         />
       );
     }
 
     if (field.inputKind === "boolean") {
+      const selectValue =
+        typeof selected.value === "boolean" ? String(selected.value) : "";
+
       return (
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={Boolean(selected.value)}
-            onChange={(event) => updateFieldValue(field.id, event.target.checked)}
-          />
-          <span>{Boolean(selected.value) ? "Enabled" : "Disabled"}</span>
-        </label>
+        <select
+          value={selectValue}
+          onChange={(event) => {
+            const value = event.target.value;
+            updateFieldValue(field.id, value === "" ? "" : value === "true");
+          }}
+        >
+          <option value="">Unset</option>
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
       );
     }
 
@@ -422,7 +517,7 @@ function App() {
             : { instances: [], attributes: [] };
         const guidance = itemizedGuidance[field.id] ?? {
           instancesTitle: "Instances",
-          instancesHint: field.placeholder ?? "One instance definition per line",
+          instancesHint: placeholder ?? "One instance definition per line",
           attributesHint: "Shared attribute defaults. Example: name=value"
         };
 
@@ -434,7 +529,7 @@ function App() {
               <textarea
                 rows={4}
                 value={itemizedValue.instances.join("\n")}
-                placeholder={field.placeholder}
+                placeholder={placeholder ?? guidance.instancesHint.replace("Example: ", "")}
                 onChange={(event) =>
                   updateItemizedFieldValue(field.id, "instances", event.target.value)
                 }
@@ -459,15 +554,16 @@ function App() {
       return (
         <textarea
           rows={3}
-          value={Array.isArray(selected.value) ? selected.value.join(", ") : ""}
-          placeholder={field.placeholder}
+          value={Array.isArray(selected.value) ? selected.value.join(", ") : String(selected.value)}
+          placeholder={placeholder}
           onChange={(event) =>
             updateFieldValue(
               field.id,
-              event.target.value
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean)
+              field.valueType === "array"
+                ? parseListInput(field, event.target.value)
+                : field.valueType === "objectArray"
+                  ? parseListInput(field, event.target.value)
+                : event.target.value
             )
           }
         />
@@ -478,7 +574,7 @@ function App() {
       <input
         type="text"
         value={String(selected.value)}
-        placeholder={field.placeholder}
+        placeholder={placeholder}
         onChange={(event) => updateFieldValue(field.id, event.target.value)}
       />
     );
@@ -487,15 +583,25 @@ function App() {
   function renderSettingInput(field: Field, selected: SelectedField) {
     return field.settingsSchema?.map((setting) => {
       if (setting.inputKind === "boolean") {
+        const settingValue = selected.settings[setting.id];
+        const selectValue =
+          typeof settingValue === "boolean" ? String(settingValue) : "";
+
         return (
           <label key={setting.id} className="setting-card">
             <span>{setting.label}</span>
             <small>{setting.description}</small>
-            <input
-              type="checkbox"
-              checked={Boolean(selected.settings[setting.id])}
-              onChange={(event) => updateFieldSetting(field.id, setting.id, event.target.checked)}
-            />
+            <select
+              value={selectValue}
+              onChange={(event) => {
+                const value = event.target.value;
+                updateFieldSetting(field.id, setting.id, value === "" ? "" : value === "true");
+              }}
+            >
+              <option value="">Unset</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
           </label>
         );
       }
@@ -508,7 +614,28 @@ function App() {
             <input
               type="number"
               value={String(selected.settings[setting.id] ?? "")}
-              onChange={(event) => updateFieldSetting(field.id, setting.id, Number(event.target.value))}
+              onChange={(event) =>
+                updateFieldSetting(field.id, setting.id, event.target.value === "" ? "" : Number(event.target.value))
+              }
+            />
+          </label>
+        );
+      }
+
+      if (setting.id === "locked" || setting.id === "attributeRules") {
+        return (
+          <label key={setting.id} className="setting-card">
+            <span>{setting.label}</span>
+            <small>{setting.description}</small>
+            <textarea
+              rows={3}
+              value={String(selected.settings[setting.id] ?? "")}
+              placeholder={
+                setting.id === "attributeRules"
+                  ? "quantity.required=true\nurl.options=value=https://example.com"
+                  : "WANDB_BASE_URL, vol-data-1"
+              }
+              onChange={(event) => updateFieldSetting(field.id, setting.id, event.target.value)}
             />
           </label>
         );
@@ -521,7 +648,13 @@ function App() {
           <input
             type="text"
             value={String(selected.settings[setting.id] ?? "")}
-            placeholder="comma,separated,values"
+            placeholder={
+              setting.id === "options"
+                ? "Always, Never"
+                : setting.id === "defaultFrom"
+                  ? "field=compute.cpuCoreLimit, factor=0.5"
+                  : "comma,separated,values"
+            }
             onChange={(event) => updateFieldSetting(field.id, setting.id, event.target.value)}
           />
         </label>
@@ -552,11 +685,11 @@ function App() {
   return (
     <div className="app-shell">
       <aside className="left-panel">
-        <div className="brand-block">
+        <button type="button" className="brand-block brand-button" onClick={() => resetPolicyDraft("workload")}>
           <p className="eyebrow">NVIDIA Run:ai</p>
           <h1>Policy studio</h1>
           <p className="muted">Policy defaults and rules.</p>
-        </div>
+        </button>
 
         <div className="green-card">
           <p className="eyebrow">Reference-driven</p>
@@ -571,7 +704,7 @@ function App() {
             <button
               key={step.id}
               className={`step ${activeStep === step.id ? "active" : ""}`}
-              onClick={() => setActiveStep(step.id)}
+              onClick={() => handleStepClick(step.id)}
               type="button"
             >
               <span>{index + 1}</span>
@@ -603,7 +736,7 @@ function App() {
                   key={item.id}
                   type="button"
                   className={`workload-card ${selectedWorkload === item.id ? "selected" : ""}`}
-                  onClick={() => setSelectedWorkload(item.id)}
+                  onClick={() => handleWorkloadSelect(item.id)}
                 >
                   <h3>{item.label}</h3>
                   <p>{item.description}</p>
@@ -784,8 +917,12 @@ function App() {
           <p className="muted">{workload?.description}</p>
           <div className="stat-grid">
             <div>
-              <strong>{selectedFields.length}</strong>
-              <span>Keys selected</span>
+              <strong>
+                {generated
+                  ? `${generated.summary.renderedFieldCount}/${generated.summary.selectedFieldCount}`
+                  : selectedFields.length}
+              </strong>
+              <span>Keys generated</span>
             </div>
             <div>
               <strong>{generated?.summary.ruleCount ?? 0}</strong>
@@ -807,7 +944,7 @@ function App() {
                 <strong>{section.count}</strong>
               </div>
             ))}
-            {!generated?.summary.sectionCounts.length && <p className="muted">Section counts update as soon as you add keys.</p>}
+            {!generated?.summary.sectionCounts.length && <p className="muted">Section counts update as soon as valid keys render.</p>}
           </div>
           <button type="button" className="secondary wide" onClick={() => setActiveStep("review")}>
             Open Review
