@@ -24,6 +24,7 @@ const booleanKeys = new Set([
 const numericKeys = new Set([
   "activationReplicas",
   "concurrencyHardLimit",
+  "container",
   "external",
   "factor",
   "failureThreshold",
@@ -535,19 +536,6 @@ function parseValidItemizedInstance(value: string, field: Field) {
   const parsed = parseKeyValuePairs(value);
 
   if (Object.keys(parsed).length > 0) {
-    if (field.id === "ports") {
-      const container = parsed.container;
-
-      if (
-        typeof container === "object" &&
-        container !== null &&
-        !Array.isArray(container) &&
-        "port" in container
-      ) {
-        parsed.container = String((container as Record<string, unknown>).port);
-      }
-    }
-
     normalizeItemizedInstance(field, parsed);
 
     const hasRequiredKeys = field.itemRequiredKeys?.every((key) => key in parsed) ?? true;
@@ -574,6 +562,29 @@ function parseValidItemizedInstance(value: string, field: Field) {
 }
 
 function normalizeItemizedInstance(field: Field, instance: Record<string, unknown>) {
+  if (field.id === "ports") {
+    const container = instance.container;
+
+    if (
+      typeof container === "object" &&
+      container !== null &&
+      !Array.isArray(container) &&
+      "port" in container
+    ) {
+      const port = (container as Record<string, unknown>).port;
+      instance.container =
+        typeof port === "number" || (typeof port === "string" && /^-?\d+(\.\d+)?$/.test(port.trim()))
+          ? Number(port)
+          : port;
+    } else if (typeof container === "string" && /^-?\d+(\.\d+)?$/.test(container.trim())) {
+      instance.container = Number(container);
+    }
+
+    if ("toolType" in instance) {
+      delete instance.serviceType;
+    }
+  }
+
   if (field.id === "storageSecretVolume" && "secretName" in instance && !("secret" in instance)) {
     instance.secret = instance.secretName;
     delete instance.secretName;
@@ -831,7 +842,13 @@ function renderDefaultValue(field: Field, value: SelectedField["value"], workloa
   }
 
   if (field.valueType === "objectArray") {
-    return renderObjectArrayDefault(field, value);
+    const rendered = renderObjectArrayDefault(field, value);
+
+    if (field.id === "imagePullSecrets" && rendered) {
+      return { instances: rendered };
+    }
+
+    return rendered;
   }
 
   if (field.valueType === "object") {
@@ -903,6 +920,32 @@ function supportedSettingEntries(field: Field, settings: SelectedField["settings
 function unsupportedSettingEntries(field: Field, settings: SelectedField["settings"]) {
   const supportedIds = new Set(field.settingsSchema?.map((setting) => setting.id) ?? []);
   return activeSettingEntries(settings).filter(([settingId]) => !supportedIds.has(settingId));
+}
+
+function numericSetting(settings: SelectedField["settings"], settingId: string) {
+  const value = settings[settingId];
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim())) {
+    return Number(value.trim());
+  }
+
+  return null;
+}
+
+function stepExceedsMinMaxRange(field: Field, settings: SelectedField["settings"]) {
+  if (field.valueType !== "integer" && field.valueType !== "number") {
+    return false;
+  }
+
+  const step = numericSetting(settings, "step");
+  const min = numericSetting(settings, "min");
+  const max = numericSetting(settings, "max");
+
+  return step !== null && min !== null && max !== null && step > max - min;
 }
 
 function inputWarningsForField(field: Field, selected: SelectedField) {
@@ -1006,6 +1049,10 @@ function settingWarningsForField(field: Field, selected: SelectedField) {
       }
     }
   });
+
+  if (stepExceedsMinMaxRange(field, selected.settings)) {
+    warnings.push(`${field.label} step must not exceed the min/max range.`);
+  }
 
   return warnings;
 }
@@ -1274,7 +1321,9 @@ function parseStructuredItemizedRules(value: string, field: Field) {
 }
 
 function renderRulesForField(field: Field, settings: SelectedField["settings"]) {
-  const activeRules = supportedSettingEntries(field, settings);
+  const activeRules = supportedSettingEntries(field, settings).filter(
+    ([settingId]) => settingId !== "step" || !stepExceedsMinMaxRange(field, settings)
+  );
 
   if (field.valueType !== "itemized") {
     return Object.fromEntries(
@@ -1307,6 +1356,10 @@ function renderRulesForField(field: Field, settings: SelectedField["settings"]) 
     }
 
     if (settingId === "locked") {
+      if (typeof value !== "string") {
+        return;
+      }
+
       const locked = splitList(String(value));
       if (locked.length > 0) {
         instances.locked = locked;
@@ -1416,9 +1469,80 @@ function renderedRuleCountForField(field: Field, activeRules: Record<string, unk
   return instanceRules + attributeRules;
 }
 
-function crossFieldWarnings(defaults: Record<string, unknown>, workloadType: string) {
+function hasLockedImageDefault(defaults: Record<string, unknown>, rules: Record<string, unknown>): boolean {
+  const image = typeof defaults.image === "string" ? defaults.image.trim() : "";
+  const imageRules = isRecord(rules.image) ? rules.image : null;
+
+  if (image && imageRules?.canEdit === false) {
+    return true;
+  }
+
+  return Object.entries(defaults).some(([scope, scopedDefaults]) => {
+    const scopedRules = rules[scope];
+    return isRecord(scopedDefaults) && isRecord(scopedRules) && hasLockedImageDefault(scopedDefaults, scopedRules);
+  });
+}
+
+function optionRuleValues(rule: unknown) {
+  if (!isRecord(rule) || !Array.isArray(rule.options)) {
+    return [];
+  }
+
+  return rule.options
+    .map((option) => (isRecord(option) && typeof option.value === "string" ? option.value.trim() : ""))
+    .filter(Boolean);
+}
+
+function hasSingleOptionRule(rule: unknown, expectedValue: string) {
+  const values = optionRuleValues(rule);
+  return values.length === 1 && values[0] === expectedValue;
+}
+
+function gpuFractionWarningsForCompute(compute: unknown, computeRules: unknown) {
+  const warnings: string[] = [];
+
+  if (!isRecord(compute)) {
+    return warnings;
+  }
+
+  const gpuRequestType = typeof compute.gpuRequestType === "string" ? compute.gpuRequestType : "";
+  const gpuRequestTypeRule = isRecord(computeRules) ? computeRules.gpuRequestType : undefined;
+  const hasPortionDefault = compute.gpuPortionRequest !== undefined || compute.gpuPortionLimit !== undefined;
+  const hasMemoryDefault = compute.gpuMemoryRequest !== undefined || compute.gpuMemoryLimit !== undefined;
+
+  if (hasPortionDefault && (gpuRequestType !== "portion" || !hasSingleOptionRule(gpuRequestTypeRule, "portion"))) {
+    warnings.push(
+      "GPU portion defaults require GPU Request Type to default to portion with options limited to portion."
+    );
+  }
+
+  if (hasMemoryDefault && (gpuRequestType !== "memory" || !hasSingleOptionRule(gpuRequestTypeRule, "memory"))) {
+    warnings.push(
+      "GPU memory defaults require GPU Request Type to default to memory with options limited to memory."
+    );
+  }
+
+  return warnings;
+}
+
+function crossFieldWarnings(defaults: Record<string, unknown>, rules: Record<string, unknown>, workloadType: string) {
   const warnings: string[] = [];
   const autoscaling = defaults.autoscaling;
+
+  if (hasLockedImageDefault(defaults, rules)) {
+    warnings.push("Image canEdit=false can prevent templates with a different image from being selected.");
+  }
+
+  warnings.push(...gpuFractionWarningsForCompute(defaults.compute, rules.compute));
+
+  Object.entries(defaults).forEach(([scope, scopedDefaults]) => {
+    if (!isRecord(scopedDefaults)) {
+      return;
+    }
+
+    const scopedRules = rules[scope];
+    warnings.push(...gpuFractionWarningsForCompute(scopedDefaults.compute, isRecord(scopedRules) ? scopedRules.compute : undefined));
+  });
 
   if (!isRecord(autoscaling)) {
     return warnings;
@@ -1565,7 +1689,7 @@ export function generatePolicy(payload: GenerateRequest): GenerateResponse {
     warnings.push("servingPort.authorizedUsers and servingPort.authorizedGroups are mutually exclusive.");
   }
 
-  warnings.push(...crossFieldWarnings(defaults, payload.workloadType));
+  warnings.push(...crossFieldWarnings(defaults, rules, payload.workloadType));
 
   const counts = catalog.sections
     .filter((section) => sectionCounts.has(section.id))

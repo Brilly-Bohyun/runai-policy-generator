@@ -47,6 +47,7 @@ export type Field = {
   itemKey?: string;
   itemRequiredKeys?: string[];
   itemRequiredAnyKeys?: string[];
+  disabledSettings?: string[];
   options?: string[];
   ruleHints?: string[];
   settingsSchema?: FieldSetting[];

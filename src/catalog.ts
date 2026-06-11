@@ -81,23 +81,28 @@ function mergeSettings(existing: FieldSetting[] | undefined, defaults: FieldSett
 }
 
 function normalizeSettings(field: Field) {
+  const withoutDisabledSettings = (settings: FieldSetting[]) => {
+    const disabled = new Set(field.disabledSettings ?? []);
+    return settings.filter((setting) => !disabled.has(setting.id));
+  };
+
   switch (field.valueType) {
     case "boolean":
-      return mergeSettings(field.settingsSchema, booleanRuleTemplate);
+      return withoutDisabledSettings(mergeSettings(field.settingsSchema, booleanRuleTemplate));
     case "string":
-      return mergeSettings(field.settingsSchema, stringRuleTemplate);
+      return withoutDisabledSettings(mergeSettings(field.settingsSchema, stringRuleTemplate));
     case "integer":
     case "number":
-      return mergeSettings(field.settingsSchema, numericRuleTemplate);
+      return withoutDisabledSettings(mergeSettings(field.settingsSchema, numericRuleTemplate));
     case "quantity":
-      return mergeSettings(field.settingsSchema, quantityRuleTemplate);
+      return withoutDisabledSettings(mergeSettings(field.settingsSchema, quantityRuleTemplate));
     case "array":
     case "objectArray":
-      return mergeSettings(field.settingsSchema, arrayRuleTemplate);
+      return withoutDisabledSettings(mergeSettings(field.settingsSchema, arrayRuleTemplate));
     case "itemized":
-      return mergeSettings(field.settingsSchema, itemizedRuleTemplate);
+      return withoutDisabledSettings(mergeSettings(field.settingsSchema, itemizedRuleTemplate));
     default:
-      return field.settingsSchema ?? [];
+      return withoutDisabledSettings(field.settingsSchema ?? []);
   }
 }
 
@@ -324,7 +329,7 @@ const baseCatalog: Catalog = {
       },
       settingsSchema: [
         { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional environment variable instances." },
-        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
+        { id: "locked", label: "Locked Keys", inputKind: "text", description: "Comma or newline separated environment variable names that cannot be edited or excluded." }
       ]
     },
     {
@@ -337,14 +342,14 @@ const baseCatalog: Catalog = {
       inputKind: "list",
       valueType: "objectArray",
       placeholder: "name=nvcr-pull-secret, userCredential=false, exclude=false",
+      disabledSettings: ["canEdit"],
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
         [distributedInference]: "role"
       },
       settingsSchema: [
-        { id: "required", label: "Required", inputKind: "boolean", description: "Require one or more pull secrets." },
-        { id: "canEdit", label: "Can Edit", inputKind: "boolean", description: "Allow changes to the provided secret list." }
+        { id: "required", label: "Required", inputKind: "boolean", description: "Require one or more pull secrets." }
       ]
     },
     {
@@ -365,7 +370,7 @@ const baseCatalog: Catalog = {
       },
       settingsSchema: [
         { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional annotation instances." },
-        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
+        { id: "locked", label: "Locked Keys", inputKind: "text", description: "Comma or newline separated annotation names that cannot be edited or excluded." }
       ]
     },
     {
@@ -386,7 +391,7 @@ const baseCatalog: Catalog = {
       },
       settingsSchema: [
         { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional label instances." },
-        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
+        { id: "locked", label: "Locked Keys", inputKind: "text", description: "Comma or newline separated label names that cannot be edited or excluded." }
       ]
     },
     {
@@ -505,14 +510,14 @@ const baseCatalog: Catalog = {
       inputKind: "list",
       valueType: "itemized",
       placeholder: "key=gpu, operator=Equal, value=true, effect=NoSchedule",
+      disabledSettings: ["locked"],
       supportedWorkloads: allWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role",
         [distributedInference]: "role"
       },
       settingsSchema: [
-        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional toleration instances." },
-        { id: "locked", label: "Locked", inputKind: "boolean", description: "Prevent editing or excluding default instances." }
+        { id: "canAdd", label: "Can Add", inputKind: "boolean", description: "Allow additional toleration instances." }
       ]
     },
     {
@@ -1422,7 +1427,7 @@ const baseCatalog: Catalog = {
       yamlPath: "ports",
       inputKind: "list",
       valueType: "itemized",
-      placeholder: "container=8888, serviceType=NodePort, toolName=Jupyter",
+      placeholder: "container=8888, toolType=jupyter-notebook, toolName=Jupyter",
       supportedWorkloads: classicWorkloads,
       scopeByWorkload: {
         [distributedTraining]: "role"

@@ -42,7 +42,7 @@ const itemizedGuidance: Record<
   },
   ports: {
     instancesTitle: "Port instances",
-    instancesHint: "Example: container=8888, serviceType=NodePort, toolName=Jupyter",
+    instancesHint: "Example: container=8888, toolType=jupyter-notebook, toolName=Jupyter",
     attributesHint: "Shared attribute defaults. Example: serviceType=ClusterIP"
   },
   exposedUrls: {
@@ -187,16 +187,27 @@ function sameSelectedFields(left: SelectedField[], right: SelectedField[]) {
   return left.length === right.length && left.every((field, index) => field === right[index]);
 }
 
+function policyKeyActionLabel(action: "Add" | "Remove", fieldLabel: string) {
+  return `${action} ${fieldLabel} policy key`;
+}
+
 function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [selectedWorkload, setSelectedWorkload] = useState("");
+  const [hasChosenWorkload, setHasChosenWorkload] = useState(false);
   const [activeStep, setActiveStep] = useState("workload");
   const [selectedFields, setSelectedFields] = useState<SelectedField[]>([]);
   const [imposedAssets, setImposedAssets] = useState<string[]>([]);
   const [generated, setGenerated] = useState<GenerateResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const fieldsById = useMemo(() => {
+    return new Map(catalog?.fields.map((field) => [field.id, field]) ?? []);
+  }, [catalog]);
+  const selectedFieldIds = useMemo(() => {
+    return new Set(selectedFields.map((field) => field.fieldId));
+  }, [selectedFields]);
 
   useEffect(() => {
     async function load() {
@@ -221,13 +232,13 @@ function App() {
 
     setSelectedFields((current) => {
       const filtered = current.filter((selected) => {
-        const field = catalog.fields.find((item) => item.id === selected.fieldId);
+        const field = fieldsById.get(selected.fieldId);
         return field ? isFieldAvailable(field, selectedWorkload, current) : false;
       });
 
       return sameSelectedFields(current, filtered) ? current : filtered;
     });
-  }, [catalog, selectedFields, selectedWorkload]);
+  }, [catalog, fieldsById, selectedFields, selectedWorkload]);
 
   const sections = useMemo(() => {
     if (!catalog || !selectedWorkload) {
@@ -255,14 +266,37 @@ function App() {
 
   useEffect(() => {
     if (!selectedWorkload) {
+      setGenerated(null);
       return;
     }
+
+    let isCurrent = true;
 
     void generatePolicy({
       workloadType: selectedWorkload,
       selected: selectedFields,
       imposedAssets
-    }).then(setGenerated);
+    })
+      .then((nextGenerated) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        setGenerated(nextGenerated);
+        setError("");
+      })
+      .catch((nextError) => {
+        if (!isCurrent) {
+          return;
+        }
+
+        setGenerated(null);
+        setError(nextError instanceof Error ? nextError.message : "Failed to generate policy YAML.");
+      });
+
+    return () => {
+      isCurrent = false;
+    };
   }, [imposedAssets, selectedFields, selectedWorkload]);
 
   useEffect(() => {
@@ -286,8 +320,14 @@ function App() {
     ];
   }, [catalog, sections]);
 
-  const activeSection = sections.find((section) => section.id === activeStep) ?? reviewSection;
-  const workload = catalog?.workloadTypes.find((item) => item.id === selectedWorkload);
+  const activeSection = useMemo(
+    () => sections.find((section) => section.id === activeStep) ?? reviewSection,
+    [activeStep, sections]
+  );
+  const workload = useMemo(
+    () => catalog?.workloadTypes.find((item) => item.id === selectedWorkload),
+    [catalog, selectedWorkload]
+  );
   const availableFieldCount = useMemo(() => {
     if (!catalog || !selectedWorkload) {
       return 0;
@@ -302,12 +342,12 @@ function App() {
     }
 
     return catalog.fields.filter(
-        (field) =>
-          field.sectionId === activeStep &&
-          isFieldAvailable(field, selectedWorkload, selectedFields) &&
-          !selectedFields.some((selected) => selected.fieldId === field.id)
+      (field) =>
+        field.sectionId === activeStep &&
+        isFieldAvailable(field, selectedWorkload, selectedFields) &&
+        !selectedFieldIds.has(field.id)
     );
-  }, [activeStep, catalog, selectedFields, selectedWorkload]);
+  }, [activeStep, catalog, selectedFieldIds, selectedFields, selectedWorkload]);
 
   const selectedForSection = useMemo(() => {
     if (activeStep === "workload" || activeStep === "review") {
@@ -423,6 +463,9 @@ function App() {
     setImposedAssets([]);
     setGenerated(null);
     setCopied(false);
+    if (nextStep === "workload") {
+      setHasChosenWorkload(false);
+    }
     setActiveStep(nextStep);
   }
 
@@ -444,6 +487,7 @@ function App() {
     }
 
     setSelectedWorkload(workloadId);
+    setHasChosenWorkload(true);
   }
 
   async function handleCopyYaml() {
@@ -453,6 +497,7 @@ function App() {
 
     try {
       await navigator.clipboard.writeText(generated.yaml);
+      setError("");
       setCopied(true);
     } catch {
       setError("Failed to copy YAML to clipboard.");
@@ -527,7 +572,7 @@ function App() {
               <span>{guidance.instancesTitle}</span>
               <small className="muted">{guidance.instancesHint}</small>
               <textarea
-                rows={4}
+                rows={3}
                 value={itemizedValue.instances.join("\n")}
                 placeholder={placeholder ?? guidance.instancesHint.replace("Example: ", "")}
                 onChange={(event) =>
@@ -539,7 +584,7 @@ function App() {
               <span>Attributes</span>
               <small className="muted">{guidance.attributesHint}</small>
               <textarea
-                rows={3}
+                rows={2}
                 value={itemizedValue.attributes.join("\n")}
                 placeholder="name=value per line"
                 onChange={(event) =>
@@ -675,36 +720,51 @@ function App() {
   }
 
   if (loading) {
-    return <div className="empty-state full-page">Loading policy generator...</div>;
+    return (
+      <div className="empty-state full-page" role="status" aria-live="polite" aria-busy="true">
+        Loading policy generator...
+      </div>
+    );
   }
 
   if (!catalog) {
-    return <div className="empty-state full-page">Catalog unavailable. {error}</div>;
+    return (
+      <div className="empty-state full-page" role="alert">
+        Catalog unavailable. {error}
+      </div>
+    );
   }
 
   return (
     <div className="app-shell">
-      <aside className="left-panel">
-        <button type="button" className="brand-block brand-button" onClick={() => resetPolicyDraft("workload")}>
+      <aside className="left-panel" aria-label="Policy navigation">
+        <button
+          type="button"
+          className="brand-block brand-button"
+          aria-label="Reset policy draft"
+          onClick={() => resetPolicyDraft("workload")}
+        >
           <p className="eyebrow">NVIDIA Run:ai</p>
           <h1>Policy studio</h1>
-          <p className="muted">Policy defaults and rules.</p>
+          <p className="muted">Make policies more easily.</p>
         </button>
 
         <div className="green-card">
           <p className="eyebrow">Reference-driven</p>
           <strong>{availableFieldCount} policy keys</strong>
           <p className="muted">
-            {workload ? `${workload.label} workload에서 지원되는 key만 표시합니다.` : "Allowed keys only."}
+            {workload ? `Showing keys supported by ${workload.label} workloads.` : "Allowed keys only."}
           </p>
         </div>
 
-        <nav className="stepper">
+        <nav className="stepper" aria-label="Policy builder steps">
           {steps.map((step, index) => (
             <button
               key={step.id}
               className={`step ${activeStep === step.id ? "active" : ""}`}
               onClick={() => handleStepClick(step.id)}
+              aria-current={activeStep === step.id ? "step" : undefined}
+              aria-label={activeStep === step.id ? `Current step: ${step.label}` : `Go to ${step.label}`}
               type="button"
             >
               <span>{index + 1}</span>
@@ -714,13 +774,13 @@ function App() {
         </nav>
       </aside>
 
-      <main className="editor-panel">
+      <main className="editor-panel" aria-label="Policy builder">
         {activeStep === "workload" ? (
-          <section>
+          <section aria-labelledby="policy-editor-title">
             <header className="section-header">
               <div>
                 <p className="eyebrow">Step 1</p>
-                <h2>Choose a workload type</h2>
+                <h2 id="policy-editor-title">Choose a workload type</h2>
                 <p className="muted">
                   Only supported keys are shown.
                 </p>
@@ -735,7 +795,9 @@ function App() {
                 <button
                   key={item.id}
                   type="button"
-                  className={`workload-card ${selectedWorkload === item.id ? "selected" : ""}`}
+                  className={`workload-card ${hasChosenWorkload && selectedWorkload === item.id ? "selected" : ""}`}
+                  aria-label={`Select ${item.label} workload type`}
+                  aria-pressed={hasChosenWorkload && selectedWorkload === item.id}
                   onClick={() => handleWorkloadSelect(item.id)}
                 >
                   <h3>{item.label}</h3>
@@ -752,22 +814,32 @@ function App() {
             </div>
           </section>
         ) : activeStep === "review" ? (
-          <section>
+          <section aria-labelledby="policy-editor-title">
             <header className="section-header">
               <div>
                 <p className="eyebrow">Final Step</p>
-                <h2>Review generated YAML</h2>
+                <h2 id="policy-editor-title">Review generated YAML</h2>
                 <p className="muted">Copy the final policy YAML.</p>
               </div>
               <div className="review-actions">
-                <button type="button" className="secondary" onClick={handleCopyYaml} disabled={!generated?.yaml}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleCopyYaml}
+                  disabled={!generated?.yaml}
+                  aria-label="Copy generated YAML preview"
+                  aria-describedby="copy-yaml-status"
+                >
                   {copied ? "Copied" : "Copy YAML"}
                 </button>
+                <span id="copy-yaml-status" className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                  {copied ? "YAML copied to clipboard." : ""}
+                </span>
               </div>
             </header>
 
             <div className="review-panel">
-              <div className="review-card">
+              <div className="review-card" role="status" aria-live="polite" aria-atomic="true">
                 <h3>Warnings</h3>
                 {generated?.warnings.length ? (
                   <ul className="warning-list">
@@ -780,43 +852,65 @@ function App() {
                 )}
               </div>
               <div className="yaml-card">
-                <h3>YAML Preview</h3>
-                <pre>{generated?.yaml ?? "# YAML preview will appear here"}</pre>
+                <h3 id="yaml-preview-title">YAML Preview</h3>
+                <p id="yaml-preview-description" className="sr-only">
+                  Read-only generated policy YAML. Focus this region to scroll the preview with the keyboard.
+                </p>
+                <pre
+                  id="yaml-preview"
+                  role="region"
+                  aria-labelledby="yaml-preview-title"
+                  aria-describedby="yaml-preview-description"
+                  tabIndex={0}
+                >{generated?.yaml ?? "# YAML preview will appear here"}</pre>
               </div>
             </div>
           </section>
         ) : (
-          <section>
+          <section aria-labelledby="policy-editor-title">
             <header className="section-header">
               <div>
                 <p className="eyebrow">Section</p>
-                <h2>{activeSection.label}</h2>
+                <h2 id="policy-editor-title">{activeSection.label}</h2>
                 <p className="muted">{activeSection.description}</p>
               </div>
             </header>
 
-            <div className="toolbar">
+            <div className="toolbar add-key-toolbar">
               <div>
-                <strong>Add policy key</strong>
+                <strong id="add-policy-key-title">Add policy key</strong>
                 <p className="muted">Allowed keys for this workload.</p>
               </div>
-              <div className="field-picker">
+              <div className="field-picker" role="group" aria-labelledby="add-policy-key-title">
                 {availableFields.map((field) => (
-                  <button key={field.id} type="button" className="secondary" onClick={() => addField(field)}>
+                  <button
+                    key={field.id}
+                    type="button"
+                    className="secondary"
+                    aria-label={policyKeyActionLabel("Add", field.label)}
+                    onClick={() => addField(field)}
+                  >
                     + {field.label}
                   </button>
                 ))}
-                {!availableFields.length && <span className="muted">No more compatible keys in this section.</span>}
+                {!availableFields.length && (
+                  <span className="muted" role="status" aria-live="polite">
+                    No more compatible keys in this section.
+                  </span>
+                )}
               </div>
             </div>
 
             {activeStep === "storage" && (
               <div className="toolbar toolbar-stack">
                 <div>
-                  <strong>Imposed assets</strong>
+                  <label htmlFor="imposed-assets-input">
+                    <strong>Imposed assets</strong>
+                  </label>
                   <p className="muted">One storage datasource asset ID per line.</p>
                 </div>
                 <textarea
+                  id="imposed-assets-input"
                   rows={3}
                   value={imposedAssets.join("\n")}
                   placeholder="f12c965b-44e9-4ff6-8b43-01d8f9e630cc"
@@ -827,19 +921,26 @@ function App() {
 
             <div className="field-list">
               {selectedForSection.map((selected) => {
-                const field = catalog.fields.find((item) => item.id === selected.fieldId);
+                const field = fieldsById.get(selected.fieldId);
                 if (!field) {
                   return null;
                 }
 
+                const fieldCardTitleId = `field-card-${field.id}-title`;
+
                 return (
-                  <article className="field-card" key={field.id}>
+                  <article className="field-card" key={field.id} aria-labelledby={fieldCardTitleId}>
                     <div className="field-card-header">
                       <div>
-                        <h3>{field.label}</h3>
+                        <h3 id={fieldCardTitleId}>{field.label}</h3>
                         <p className="muted">{field.description}</p>
                       </div>
-                      <button type="button" className="ghost" onClick={() => removeField(field.id)}>
+                      <button
+                        type="button"
+                        className="ghost"
+                        aria-label={policyKeyActionLabel("Remove", field.label)}
+                        onClick={() => removeField(field.id)}
+                      >
                         Remove
                       </button>
                     </div>
@@ -901,7 +1002,7 @@ function App() {
               })}
 
               {!selectedForSection.length && (
-                <div className="empty-state">
+                <div className="empty-state" role="status" aria-live="polite" aria-atomic="true">
                   No keys selected yet.
                 </div>
               )}
@@ -910,7 +1011,7 @@ function App() {
         )}
       </main>
 
-      <aside className="summary-panel">
+      <aside className="summary-panel" aria-label="Policy summary">
         <div className="summary-card accent-card">
           <p className="eyebrow">Selection Summary</p>
           <h2>{workload?.label ?? "Choose a workload"}</h2>
@@ -935,27 +1036,49 @@ function App() {
           </div>
         </div>
 
-        <div className="summary-card">
+        <div className="summary-card summary-coverage">
           <h3>Rule coverage</h3>
-          <div className="summary-list">
-            {generated?.summary.sectionCounts.map((section) => (
-              <div key={section.sectionId} className="summary-row">
-                <span>{section.label}</span>
-                <strong>{section.count}</strong>
-              </div>
-            ))}
-            {!generated?.summary.sectionCounts.length && <p className="muted">Section counts update as soon as valid keys render.</p>}
-          </div>
+          {generated?.summary.sectionCounts.length ? (
+            <dl className="summary-list">
+              {generated.summary.sectionCounts.map((section) => (
+                <div key={section.sectionId} className="summary-row">
+                  <dt>{section.label}</dt>
+                  <dd>
+                    <strong>{section.count}</strong>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="muted">Section counts update as soon as valid keys render.</p>
+          )}
           <button type="button" className="secondary wide" onClick={() => setActiveStep("review")}>
             Open Review
           </button>
         </div>
 
-        <div className="summary-card">
+        <div className="summary-card summary-notes" aria-live="polite" aria-atomic="true">
           <h3>Review notes</h3>
-          {error && <p className="error-text">{error}</p>}
+          {error && (
+            <p className="error-text" role="alert">
+              {error}
+            </p>
+          )}
           {generated && <p>{generated.summary.humanSummary}</p>}
         </div>
+
+        <p className="version-note">
+          Optimized for Run:ai 2.24.
+          <br />
+          <a
+            href="https://run-ai-docs.nvidia.com/self-hosted/platform-management/policies/policy-yaml-reference"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open official Run:ai YAML reference in a new tab"
+          >
+            Official YAML reference
+          </a>
+        </p>
       </aside>
     </div>
   );

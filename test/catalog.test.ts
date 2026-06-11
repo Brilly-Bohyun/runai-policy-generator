@@ -213,6 +213,28 @@ describe("catalog policy metadata", () => {
     expect(field("labels").itemRequiredKeys).toEqual(["name", "value"]);
   });
 
+  it("exposes locked itemized rules as key lists rather than booleans", () => {
+    [
+      "environmentVariables",
+      "annotations",
+      "labels",
+      "storageHostPath",
+      "ports",
+      "exposedUrls"
+    ].forEach((fieldId) => {
+      const locked = field(fieldId).settingsSchema?.find((setting) => setting.id === "locked");
+
+      expect(locked?.inputKind).toBe("text");
+      expect(locked?.label).toBe("Locked Keys");
+    });
+  });
+
+  it("does not expose locked toleration rules because Run:ai cannot match them to defaults", () => {
+    const locked = field("tolerations").settingsSchema?.find((setting) => setting.id === "locked");
+
+    expect(locked).toBeUndefined();
+  });
+
   it("marks NIM-supported fields as available for NIM policies", () => {
     [
       "image",

@@ -178,7 +178,7 @@ describe("generatePolicy", () => {
     expect(result.yaml).not.toContain('https: "//demo.example.ai"');
   });
 
-  it("renders image pull secrets as workload API object arrays", () => {
+  it("renders image pull secrets as workload API instances", () => {
     const result = generatePolicy(
       buildPolicy({
         selected: [
@@ -196,10 +196,11 @@ describe("generatePolicy", () => {
 
     const document = parse(result.yaml);
 
-    expect(document.defaults.imagePullSecrets).toEqual([
+    expect(document.defaults.imagePullSecrets.instances).toEqual([
       { name: "nvcr-pull-secret", userCredential: false, exclude: false }
     ]);
-    expect(document.rules.imagePullSecrets).toEqual({ canEdit: false });
+    expect(document.rules).toBeNull();
+    expect(result.warnings).toContain("Image Pull Secrets does not support the canEdit rule.");
   });
 
   it("turns simple image pull secret names into named object entries", () => {
@@ -218,7 +219,7 @@ describe("generatePolicy", () => {
 
     const document = parse(result.yaml);
 
-    expect(document.defaults.imagePullSecrets).toEqual([
+    expect(document.defaults.imagePullSecrets.instances).toEqual([
       { name: "nvcr-pull-secret" },
       { name: "team-registry-secret" }
     ]);
@@ -247,7 +248,7 @@ describe("generatePolicy", () => {
     const document = parse(result.yaml);
 
     expect(result.warnings).toEqual([]);
-    expect(document.defaults.imagePullSecrets).toEqual([
+    expect(document.defaults.imagePullSecrets.instances).toEqual([
       { name: "nvcr-pull-secret", userCredential: true, exclude: false },
       { name: "team-registry-secret" }
     ]);
@@ -275,7 +276,7 @@ describe("generatePolicy", () => {
     const document = parse(result.yaml);
 
     expect(result.warnings).toEqual([]);
-    expect(document.defaults.imagePullSecrets).toEqual([
+    expect(document.defaults.imagePullSecrets.instances).toEqual([
       { name: "nvcr-pull-secret", userCredential: true, exclude: false },
       { name: "team-registry-secret" }
     ]);
@@ -600,6 +601,97 @@ describe("generatePolicy", () => {
     });
   });
 
+  it("warns when GPU portion defaults are not locked to portion request type", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        selected: [
+          {
+            fieldId: "gpuPortionRequest",
+            sectionId: "compute",
+            value: 0.5,
+            settings: {}
+          },
+          {
+            fieldId: "gpuRequestType",
+            sectionId: "compute",
+            value: "portion",
+            settings: {}
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.defaults.compute.gpuPortionRequest).toBe(0.5);
+    expect(document.defaults.compute.gpuRequestType).toBe("portion");
+    expect(result.warnings).toContain(
+      "GPU portion defaults require GPU Request Type to default to portion with options limited to portion."
+    );
+  });
+
+  it("accepts GPU portion defaults when request type is locked to portion", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        selected: [
+          {
+            fieldId: "gpuPortionRequest",
+            sectionId: "compute",
+            value: 0.5,
+            settings: {}
+          },
+          {
+            fieldId: "gpuRequestType",
+            sectionId: "compute",
+            value: "portion",
+            settings: {
+              options: "portion"
+            }
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.rules.compute.gpuRequestType.options).toEqual([{ value: "portion" }]);
+    expect(result.warnings).not.toContain(
+      "GPU portion defaults require GPU Request Type to default to portion with options limited to portion."
+    );
+  });
+
+  it("warns for role-scoped GPU portion defaults without locked request type", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        workloadType: "distributedTraining",
+        selected: [
+          {
+            fieldId: "gpuPortionRequest",
+            sectionId: "compute",
+            scope: "master",
+            value: 0.5,
+            settings: {}
+          },
+          {
+            fieldId: "gpuRequestType",
+            sectionId: "compute",
+            scope: "master",
+            value: "portion",
+            settings: {}
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.defaults.master.compute.gpuPortionRequest).toBe(0.5);
+    expect(document.defaults.master.compute.gpuRequestType).toBe("portion");
+    expect(result.warnings).toContain(
+      "GPU portion defaults require GPU Request Type to default to portion with options limited to portion."
+    );
+  });
+
   it("accepts corrected preemption spelling but emits the documented policy key", () => {
     const result = generatePolicy(
       buildPolicy({
@@ -822,6 +914,83 @@ describe("generatePolicy", () => {
     expect(document.rules.image.canedit).toBeUndefined();
   });
 
+  it("warns when locking the image default can block template selection", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        selected: [
+          {
+            fieldId: "image",
+            sectionId: "basic",
+            value: "jupyter/base-notebook:latest",
+            settings: {
+              canEdit: false
+            }
+          }
+        ]
+      })
+    );
+
+    expect(result.warnings).toContain(
+      "Image canEdit=false can prevent templates with a different image from being selected."
+    );
+  });
+
+  it("warns when locking role-scoped image defaults can block template selection", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        workloadType: "distributedTraining",
+        selected: [
+          {
+            fieldId: "image",
+            sectionId: "basic",
+            value: "jupyter/base-notebook:latest",
+            scope: "master",
+            settings: {
+              canEdit: false
+            }
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.defaults.master.image).toBe("jupyter/base-notebook:latest");
+    expect(document.rules.master.image.canEdit).toBe(false);
+    expect(result.warnings).toContain(
+      "Image canEdit=false can prevent templates with a different image from being selected."
+    );
+  });
+
+  it("omits numeric step rules that exceed the configured min/max range", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        selected: [
+          {
+            fieldId: "gpuDeviceRequest",
+            sectionId: "compute",
+            value: 1,
+            settings: {
+              required: true,
+              min: 1,
+              max: 1,
+              step: 1
+            }
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.rules.compute.gpuDevicesRequest).toEqual({
+      required: true,
+      min: 1,
+      max: 1
+    });
+    expect(result.warnings).toContain("GPU Device Request step must not exceed the min/max range.");
+  });
+
   it("keeps quantity rule bounds as strings", () => {
     const result = generatePolicy(
       buildPolicy({
@@ -926,6 +1095,70 @@ describe("generatePolicy", () => {
     });
   });
 
+  it("ignores stale boolean locked settings on itemized rules", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        selected: [
+          {
+            fieldId: "storageHostPath",
+            sectionId: "storage",
+            value: {
+              instances: ["name=vol-data-1, path=/data-1, mountPath=/mount/data-1"],
+              attributes: []
+            },
+            settings: {
+              locked: false,
+              canAdd: false
+            }
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.rules.storage.hostPath.instances).toEqual({
+      canAdd: false
+    });
+    expect(document.rules.storage.hostPath.instances.locked).toBeUndefined();
+  });
+
+  it("normalizes structured regular ports like key-value ports", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        selected: [
+          {
+            fieldId: "ports",
+            sectionId: "network",
+            value: {
+              instances: [
+                [
+                  "instances:",
+                  "  - container: \"8888\"",
+                  "    serviceType: NodePort",
+                  "    toolType: jupyter-notebook",
+                  "    toolName: Jupyter"
+                ].join("\n")
+              ],
+              attributes: []
+            },
+            settings: {}
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.defaults.ports.instances).toEqual([
+      {
+        container: 8888,
+        toolType: "jupyter-notebook",
+        toolName: "Jupyter"
+      }
+    ]);
+  });
+
   it("parses documented numeric and boolean itemized keys only where appropriate", () => {
     const result = generatePolicy(
       buildPolicy({
@@ -989,6 +1222,38 @@ describe("generatePolicy", () => {
       { key: "dedicated", operator: "Equal", value: "ml", effect: "NoExecute" }
     ]);
     expect(document.defaults.tolerations.instances[0].gpu).toBeUndefined();
+  });
+
+  it("does not render unsupported locked toleration settings", () => {
+    const result = generatePolicy(
+      buildPolicy({
+        selected: [
+          {
+            fieldId: "tolerations",
+            sectionId: "scheduling",
+            value: {
+              instances: ["key=qa-toleration, operator=Equal, value=true, effect=NoSchedule"],
+              attributes: []
+            },
+            settings: {
+              locked: "qa-toleration",
+              canAdd: false
+            }
+          }
+        ]
+      })
+    );
+
+    const document = parse(result.yaml);
+
+    expect(document.defaults.tolerations.instances).toEqual([
+      { key: "qa-toleration", operator: "Equal", value: "true", effect: "NoSchedule" }
+    ]);
+    expect(document.rules.tolerations.instances).toEqual({
+      canAdd: false
+    });
+    expect(document.rules.tolerations.instances.locked).toBeUndefined();
+    expect(result.warnings).toContain("Tolerations does not support the locked rule.");
   });
 
   it("renders node affinity defaults using nodeSelectorTerms and matchExpressions", () => {
@@ -1980,7 +2245,7 @@ describe("generatePolicy", () => {
             fieldId: "ports",
             sectionId: "network",
             value: {
-              instances: ["container.port=8888, service-type=NodePort, external=30080, tool-name=Jupyter"],
+              instances: ["container.port=8888, service-type=NodePort, external=30080, tool-type=jupyter-notebook, tool-name=Jupyter"],
               attributes: ["serviceType=ClusterIP"]
             },
             settings: {}
@@ -1993,9 +2258,9 @@ describe("generatePolicy", () => {
 
     expect(document.defaults.ports.instances).toEqual([
       {
-        container: "8888",
-        serviceType: "NodePort",
+        container: 8888,
         external: 30080,
+        toolType: "jupyter-notebook",
         toolName: "Jupyter"
       }
     ]);
@@ -2004,7 +2269,7 @@ describe("generatePolicy", () => {
     });
   });
 
-  it("keeps regular ports container values as strings", () => {
+  it("renders regular ports container values as numbers", () => {
     const result = generatePolicy(
       buildPolicy({
         selected: [
@@ -2025,7 +2290,7 @@ describe("generatePolicy", () => {
 
     expect(document.defaults.ports.instances).toEqual([
       {
-        container: "8888",
+        container: 8888,
         serviceType: "ClusterIP"
       }
     ]);
