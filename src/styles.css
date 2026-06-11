@@ -475,11 +475,11 @@ textarea {
   border: 0;
   border-bottom: 1px solid #b9bbbd;
   border-radius: var(--radius-control);
-  padding: 7px 0 8px;
+  padding: 4px 0 5px;
   background: #ffffff;
   color: var(--text);
-  font-size: 0.86rem;
-  line-height: 1.3;
+  font-size: 0.84rem;
+  line-height: 1.25;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
@@ -488,11 +488,11 @@ textarea {
 
 input,
 select {
-  min-height: 34px;
+  min-height: 28px;
 }
 
 textarea {
-  min-height: 54px;
+  min-height: 28px;
   resize: vertical;
 }
 
@@ -800,6 +800,34 @@ pre {
   text-decoration: underline;
 }
 
+.scroll-top-button {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  color: #ffffff;
+  box-shadow: var(--shadow);
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.scroll-top-icon {
+  display: block;
+  transform: rotate(-90deg) translateX(1px);
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -876,6 +904,11 @@ pre {
   .editor-panel > section > .section-header {
     padding: 14px 12px;
   }
+
+  .scroll-top-button {
+    right: 14px;
+    bottom: 14px;
+  }
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -922,6 +955,12 @@ pre {
     background: #fff4f4;
     color: #8f3036;
   }
+
+  .scroll-top-button:hover {
+    background: #68a500;
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-1px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -938,6 +977,10 @@ pre {
   .primary:not(:disabled):hover,
   .secondary:not(:disabled):hover,
   .ghost:not(:disabled):hover {
+    transform: none;
+  }
+
+  .scroll-top-button:hover {
     transform: none;
   }
 }

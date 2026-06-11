@@ -214,7 +214,6 @@ function App() {
       try {
         const nextCatalog = await fetchCatalog();
         setCatalog(nextCatalog);
-        setSelectedWorkload(nextCatalog.workloadTypes[0]?.id ?? "");
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : "Failed to load the catalog");
       } finally {
@@ -309,7 +308,7 @@ function App() {
   }, [copied]);
 
   const steps = useMemo(() => {
-    if (!catalog) {
+    if (!catalog || !selectedWorkload) {
       return [];
     }
 
@@ -319,6 +318,8 @@ function App() {
       { id: reviewSection.id, label: reviewSection.label }
     ];
   }, [catalog, sections]);
+  const activeStepNumber = Math.max(1, steps.findIndex((step) => step.id === activeStep) + 1);
+  const isLanding = activeStep === "workload" && !hasChosenWorkload;
 
   const activeSection = useMemo(
     () => sections.find((section) => section.id === activeStep) ?? reviewSection,
@@ -464,6 +465,7 @@ function App() {
     setGenerated(null);
     setCopied(false);
     if (nextStep === "workload") {
+      setSelectedWorkload("");
       setHasChosenWorkload(false);
     }
     setActiveStep(nextStep);
@@ -502,6 +504,10 @@ function App() {
     } catch {
       setError("Failed to copy YAML to clipboard.");
     }
+  }
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function renderValueInput(field: Field, selected: SelectedField) {
@@ -547,7 +553,7 @@ function App() {
             updateFieldValue(field.id, value === "" ? "" : value === "true");
           }}
         >
-          <option value="">Unset</option>
+          <option value=""></option>
           <option value="true">true</option>
           <option value="false">false</option>
         </select>
@@ -572,7 +578,7 @@ function App() {
               <span>{guidance.instancesTitle}</span>
               <small className="muted">{guidance.instancesHint}</small>
               <textarea
-                rows={3}
+                rows={2}
                 value={itemizedValue.instances.join("\n")}
                 placeholder={placeholder ?? guidance.instancesHint.replace("Example: ", "")}
                 onChange={(event) =>
@@ -584,7 +590,7 @@ function App() {
               <span>Attributes</span>
               <small className="muted">{guidance.attributesHint}</small>
               <textarea
-                rows={2}
+                rows={1}
                 value={itemizedValue.attributes.join("\n")}
                 placeholder="name=value per line"
                 onChange={(event) =>
@@ -598,7 +604,7 @@ function App() {
 
       return (
         <textarea
-          rows={3}
+          rows={2}
           value={Array.isArray(selected.value) ? selected.value.join(", ") : String(selected.value)}
           placeholder={placeholder}
           onChange={(event) =>
@@ -643,7 +649,7 @@ function App() {
                 updateFieldSetting(field.id, setting.id, value === "" ? "" : value === "true");
               }}
             >
-              <option value="">Unset</option>
+              <option value=""></option>
               <option value="true">true</option>
               <option value="false">false</option>
             </select>
@@ -673,7 +679,7 @@ function App() {
             <span>{setting.label}</span>
             <small>{setting.description}</small>
             <textarea
-              rows={3}
+              rows={2}
               value={String(selected.settings[setting.id] ?? "")}
               placeholder={
                 setting.id === "attributeRules"
@@ -698,7 +704,7 @@ function App() {
                 ? "Always, Never"
                 : setting.id === "defaultFrom"
                   ? "field=compute.cpuCoreLimit, factor=0.5"
-                  : "comma,separated,values"
+                  : "value-a, value-b"
             }
             onChange={(event) => updateFieldSetting(field.id, setting.id, event.target.value)}
           />
@@ -750,28 +756,34 @@ function App() {
         </button>
 
         <div className="green-card">
-          <p className="eyebrow">Reference-driven</p>
-          <strong>{availableFieldCount} policy keys</strong>
+          <p className="eyebrow">{isLanding ? "Start here" : "Reference-driven"}</p>
+          <strong>{isLanding ? "Build your own Run:ai policy." : `${availableFieldCount} policy keys`}</strong>
           <p className="muted">
-            {workload ? `Showing keys supported by ${workload.label} workloads.` : "Allowed keys only."}
+            {isLanding
+              ? "Select a workload type to reveal supported steps and policy keys."
+              : workload
+                ? `Showing keys supported by ${workload.label} workloads.`
+                : "Allowed keys only."}
           </p>
         </div>
 
-        <nav className="stepper" aria-label="Policy builder steps">
-          {steps.map((step, index) => (
-            <button
-              key={step.id}
-              className={`step ${activeStep === step.id ? "active" : ""}`}
-              onClick={() => handleStepClick(step.id)}
-              aria-current={activeStep === step.id ? "step" : undefined}
-              aria-label={activeStep === step.id ? `Current step: ${step.label}` : `Go to ${step.label}`}
-              type="button"
-            >
-              <span>{index + 1}</span>
-              <strong>{step.label}</strong>
-            </button>
-          ))}
-        </nav>
+        {!isLanding && (
+          <nav className="stepper" aria-label="Policy builder steps">
+            {steps.map((step, index) => (
+              <button
+                key={step.id}
+                className={`step ${activeStep === step.id ? "active" : ""}`}
+                onClick={() => handleStepClick(step.id)}
+                aria-current={activeStep === step.id ? "step" : undefined}
+                aria-label={activeStep === step.id ? `Current step: ${step.label}` : `Go to ${step.label}`}
+                type="button"
+              >
+                <span>{index + 1}</span>
+                <strong>{step.label}</strong>
+              </button>
+            ))}
+          </nav>
+        )}
       </aside>
 
       <main className="editor-panel" aria-label="Policy builder">
@@ -779,13 +791,20 @@ function App() {
           <section aria-labelledby="policy-editor-title">
             <header className="section-header">
               <div>
-                <p className="eyebrow">Step 1</p>
+                <p className="eyebrow">Step {activeStepNumber}</p>
                 <h2 id="policy-editor-title">Choose a workload type</h2>
                 <p className="muted">
-                  Only supported keys are shown.
+                  {isLanding
+                    ? "Build your own Run:ai policy. Select a workload type to start."
+                    : "Only supported keys are shown."}
                 </p>
               </div>
-              <button type="button" className="primary" onClick={() => setActiveStep(sections[0]?.id ?? "review")}>
+              <button
+                type="button"
+                className="primary"
+                disabled={!selectedWorkload}
+                onClick={() => setActiveStep(sections[0]?.id ?? "review")}
+              >
                 Start building
               </button>
             </header>
@@ -817,7 +836,7 @@ function App() {
           <section aria-labelledby="policy-editor-title">
             <header className="section-header">
               <div>
-                <p className="eyebrow">Final Step</p>
+                <p className="eyebrow">Step {activeStepNumber}</p>
                 <h2 id="policy-editor-title">Review generated YAML</h2>
                 <p className="muted">Copy the final policy YAML.</p>
               </div>
@@ -870,7 +889,7 @@ function App() {
           <section aria-labelledby="policy-editor-title">
             <header className="section-header">
               <div>
-                <p className="eyebrow">Section</p>
+                <p className="eyebrow">Step {activeStepNumber}</p>
                 <h2 id="policy-editor-title">{activeSection.label}</h2>
                 <p className="muted">{activeSection.description}</p>
               </div>
@@ -911,7 +930,7 @@ function App() {
                 </div>
                 <textarea
                   id="imposed-assets-input"
-                  rows={3}
+                  rows={2}
                   value={imposedAssets.join("\n")}
                   placeholder="f12c965b-44e9-4ff6-8b43-01d8f9e630cc"
                   onChange={(event) => updateImposedAssets(event.target.value)}
@@ -1012,60 +1031,70 @@ function App() {
       </main>
 
       <aside className="summary-panel" aria-label="Policy summary">
-        <div className="summary-card accent-card">
-          <p className="eyebrow">Selection Summary</p>
-          <h2>{workload?.label ?? "Choose a workload"}</h2>
-          <p className="muted">{workload?.description}</p>
-          <div className="stat-grid">
-            <div>
-              <strong>
-                {generated
-                  ? `${generated.summary.renderedFieldCount}/${generated.summary.selectedFieldCount}`
-                  : selectedFields.length}
-              </strong>
-              <span>Keys generated</span>
-            </div>
-            <div>
-              <strong>{generated?.summary.ruleCount ?? 0}</strong>
-              <span>Rules active</span>
-            </div>
-            <div>
-              <strong>{generated?.summary.assetCount ?? imposedAssets.length}</strong>
-              <span>Imposed assets</span>
-            </div>
+        {isLanding ? (
+          <div className="summary-card accent-card landing-summary">
+            <p className="eyebrow">Policy builder</p>
+            <h2>Build your own Run:ai policy.</h2>
+            <p className="muted">Choose a workload type, then add only the defaults and rules you need.</p>
           </div>
-        </div>
-
-        <div className="summary-card summary-coverage">
-          <h3>Rule coverage</h3>
-          {generated?.summary.sectionCounts.length ? (
-            <dl className="summary-list">
-              {generated.summary.sectionCounts.map((section) => (
-                <div key={section.sectionId} className="summary-row">
-                  <dt>{section.label}</dt>
-                  <dd>
-                    <strong>{section.count}</strong>
-                  </dd>
+        ) : (
+          <>
+            <div className="summary-card accent-card">
+              <p className="eyebrow">Selection Summary</p>
+              <h2>{workload?.label ?? "Choose a workload"}</h2>
+              <p className="muted">{workload?.description}</p>
+              <div className="stat-grid">
+                <div>
+                  <strong>
+                    {generated
+                      ? `${generated.summary.renderedFieldCount}/${generated.summary.selectedFieldCount}`
+                      : selectedFields.length}
+                  </strong>
+                  <span>Keys generated</span>
                 </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="muted">Section counts update as soon as valid keys render.</p>
-          )}
-          <button type="button" className="secondary wide" onClick={() => setActiveStep("review")}>
-            Open Review
-          </button>
-        </div>
+                <div>
+                  <strong>{generated?.summary.ruleCount ?? 0}</strong>
+                  <span>Rules active</span>
+                </div>
+                <div>
+                  <strong>{generated?.summary.assetCount ?? imposedAssets.length}</strong>
+                  <span>Imposed assets</span>
+                </div>
+              </div>
+            </div>
 
-        <div className="summary-card summary-notes" aria-live="polite" aria-atomic="true">
-          <h3>Review notes</h3>
-          {error && (
-            <p className="error-text" role="alert">
-              {error}
-            </p>
-          )}
-          {generated && <p>{generated.summary.humanSummary}</p>}
-        </div>
+            <div className="summary-card summary-coverage">
+              <h3>Rule coverage</h3>
+              {generated?.summary.sectionCounts.length ? (
+                <dl className="summary-list">
+                  {generated.summary.sectionCounts.map((section) => (
+                    <div key={section.sectionId} className="summary-row">
+                      <dt>{section.label}</dt>
+                      <dd>
+                        <strong>{section.count}</strong>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <p className="muted">Step counts update as soon as valid keys render.</p>
+              )}
+              <button type="button" className="secondary wide" onClick={() => setActiveStep("review")}>
+                Open Review
+              </button>
+            </div>
+
+            <div className="summary-card summary-notes" aria-live="polite" aria-atomic="true">
+              <h3>Review notes</h3>
+              {error && (
+                <p className="error-text" role="alert">
+                  {error}
+                </p>
+              )}
+              {generated && <p>{generated.summary.humanSummary}</p>}
+            </div>
+          </>
+        )}
 
         <p className="version-note">
           Optimized for Run:ai 2.24.
@@ -1080,6 +1109,17 @@ function App() {
           </a>
         </p>
       </aside>
+      <button
+        type="button"
+        className="scroll-top-button"
+        aria-label="Back to top"
+        title="Back to top"
+        onClick={scrollToTop}
+      >
+        <span className="scroll-top-icon" aria-hidden="true">
+          ›
+        </span>
+      </button>
     </div>
   );
 }
